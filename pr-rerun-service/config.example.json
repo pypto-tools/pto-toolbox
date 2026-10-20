@@ -1,0 +1,23 @@
+{
+  "repository": "hw-native-sys/pypto",
+  "preview_ttl": 300,
+  "preview_interval": 5,
+  "confirm_interval": 60,
+  "workflows": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "mode": "failed",
+      "identity": "pull_request"
+    },
+    {
+      "path": ".github/workflows/docs.yml",
+      "mode": "failed",
+      "identity": "pull_request"
+    },
+    {
+      "path": ".github/workflows/codex-review.yml",
+      "mode": "all",
+      "identity": "codex_manifest"
+    }
+  ]
+}

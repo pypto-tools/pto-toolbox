@@ -1,0 +1,5 @@
+include README.md README.zh-CN.md config.example.json .dockerignore requirements*.lock
+recursive-include docs *.md
+recursive-include deploy *
+recursive-include tests *.py
+global-exclude *.local.service *.local.env .env .env.* *.sqlite* *.db* *.log *.pem *.key *.p12 *.pfx

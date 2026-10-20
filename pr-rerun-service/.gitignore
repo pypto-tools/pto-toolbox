@@ -1,0 +1,27 @@
+# Runtime data and credentials
+state/
+secrets/
+.env
+.env.*
+!.env.example
+*.sqlite*
+*.db*
+*.log
+*.pid
+*.pem
+*.key
+*.p12
+*.pfx
+client.json
+deploy/*.local.service
+deploy/*.local.env
+
+# Local environments and generated artifacts
+.venv
+venv
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/

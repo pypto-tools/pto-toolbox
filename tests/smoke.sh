@@ -77,5 +77,17 @@ N="$ROOT/netbird-preflight/netbird-preflight.sh"
 check "rejects unknown flag" 2 "$N" --bogus
 
 echo
+echo "== pr-rerun-service: deployment argument handling =="
+P="$ROOT/pr-rerun-service/deploy"
+check "shared installer --help" 0 bash "$P/install-shared-client.sh" --help
+check "shared installer rejects unknown flag" 2 bash "$P/install-shared-client.sh" --bogus
+check "shared installer --dry-run" 0 bash "$P/install-shared-client.sh" --dry-run
+check "systemd installer --help" 0 bash "$P/install-systemd.sh" --help
+check "systemd installer rejects unknown flag" 2 bash "$P/install-systemd.sh" --bogus
+check "systemd installer requires explicit unit" 2 bash "$P/install-systemd.sh"
+check "systemd installer --dry-run" 0 bash "$P/install-systemd.sh" --dry-run "$P/pr-rerun.service"
+check "shared launcher syntax" 0 sh -n "$P/pr-rerun-client"
+
+echo
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

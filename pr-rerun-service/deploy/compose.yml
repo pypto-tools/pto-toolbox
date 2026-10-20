@@ -1,0 +1,27 @@
+services:
+  rerun:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    environment:
+      PR_RERUN_DATABASE: /data/rerun.sqlite
+      PR_RERUN_GITHUB_TOKEN_FILE: /run/secrets/github_token
+      PR_RERUN_CONFIG: /app/config.json
+    secrets:
+      - github_token
+    volumes:
+      - rerun-data:/data
+      - ../config.example.json:/app/config.json:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+secrets:
+  github_token:
+    file: ${PR_RERUN_TOKEN_FILE:?Set PR_RERUN_TOKEN_FILE to a protected token file}
+volumes:
+  rerun-data:

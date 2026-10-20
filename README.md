@@ -1,7 +1,7 @@
 # pto-toolbox
 
-Self-contained, single-file shell tools for Linux servers, CI runners and shared
-compute environments — the ones too small to deserve a repository of their own.
+Tools for Linux servers, CI runners and shared compute environments, including
+self-contained shell scripts and an independently deployed PR rerun service.
 
 English | [中文](README.zh-CN.md)
 
@@ -17,13 +17,13 @@ they were written for. That had three problems:
 - **They were never reviewed.** No history, no diff, no record of which
   edge case a particular line was defending against.
 
-Every tool here is a **single file you can `scp` to a fresh machine and run**.
-No install step, no runtime, no dependency beyond a POSIX shell and the
-utilities a server already has.
+The shell tools are **single files you can `scp` to a fresh machine and run**,
+using a POSIX shell and utilities a server already has.
 
-For tools that need a real install footprint — a daemon, config under
-`/home/pypto-tools/<tool>/`, a `pto-<name>` command in `PATH` — create a
-dedicated repository instead and follow the
+`pr-rerun-service/` is a Python package with its own runtime, tests, and deployment
+instructions. Its server runs independently of PyPTO; contributors use a CLI
+installed on their NetBird-connected machines. Deployment configuration and
+credentials stay on each host. See also the
 [organization tool spec](https://github.com/pypto-tools/.github).
 
 ## Tools
@@ -32,6 +32,7 @@ dedicated repository instead and follow the
 | ---- | ------------ |
 | [`deploy-git-mirror`](deploy-git-mirror/) | Makes CI clones of a hot repository local. Keeps a bare mirror on the runner and redirects the repo's URLs to it via `url.insteadOf`, turning a network clone into a same-disk hardlink clone (~20 ms). A scheduled job keeps the mirror fresh. |
 | [`netbird-preflight`](netbird-preflight/) | Checks whether a host can join the self-hosted NetBird network before you install anything. Read-only: verifies architecture, DNS, clock skew, CA trust, TCP/UDP reachability, WireGuard capability, and conflicts with existing VPNs. |
+| [`pr-rerun-service`](pr-rerun-service/) | Lets enrolled contributors preview and confirm reruns of their own PRs through NetBird. Ordinary failures rerun failed jobs; the configured Codex Review workflow reruns all jobs. Includes persistent per-user login, a shared client installer, and systemd deployment. |
 
 ## Using a tool
 
@@ -39,9 +40,9 @@ Clone the repository, or pull down the one file you need:
 
 ```bash
 # whole repository
-git clone git@github.com:pypto-tools/pto-toolbox.git
+git clone https://github.com/pypto-tools/pto-toolbox.git
 
-# a single tool (private repo — uses your gh credentials)
+# a single shell tool (uses your gh credentials)
 gh api repos/pypto-tools/pto-toolbox/contents/netbird-preflight/netbird-preflight.sh \
   --jq .content | base64 -d > netbird-preflight.sh
 chmod +x netbird-preflight.sh
@@ -50,9 +51,18 @@ chmod +x netbird-preflight.sh
 Every tool answers `--help`. Read the tool's own README before running anything
 that writes.
 
+For the rerun service, start with its [installation and usage guide](pr-rerun-service/README.md).
+Once a client is installed, each user logs in once with a service token issued
+by the administrator. `100.64.0.10` is an example, not a deployed service address:
+
+```bash
+pr-rerun login --netbird-server http://100.64.0.10:8080
+pr-rerun 123
+```
+
 ## Conventions for new tools
 
-One directory per tool, named after the script:
+One directory per tool. Shell scripts use this layout:
 
 ```text
 <tool-name>/
@@ -61,7 +71,7 @@ One directory per tool, named after the script:
 └── README.zh-CN.md     # Chinese translation
 ```
 
-A tool in this repository should:
+A shell tool in this repository should:
 
 - **Be a single file.** No sourcing sibling files, no vendored libraries.
 - **Support `-h` / `--help`** and document every flag there.
@@ -81,6 +91,11 @@ Documentation is bilingual: `README.md` is English and authoritative;
 `README.zh-CN.md` mirrors it. Code, comments and commit messages stay English;
 user-facing script output may be Chinese where the audience is.
 
+The Python service keeps its package metadata, source, tests, dependency locks,
+and deployment templates inside `pr-rerun-service/`. Read its own guide for
+runtime requirements and validation commands. Never commit databases, user
+logins, tokens, local unit files, or generated deployment bundles.
+
 ## Tests
 
 ```bash
@@ -91,8 +106,21 @@ Syntax-checks every tool, asserts `--help` works, and asserts each tool rejects
 invalid arguments and honours `--dry-run`. No network access, no side effects —
 safe to run anywhere, including CI.
 
+The Python service has a separate suite with simulated GitHub traffic:
+
+```bash
+cd pr-rerun-service
+python -m pytest tests
+ruff check src tests
+ruff format --check src tests
+pyright
+```
+
+See the service guide for creating its Python development environment first.
+
 ## AI assistant boundaries
 
-See [`skills/pto-toolbox/SKILL.md`](skills/pto-toolbox/SKILL.md) for which
+For the shell tools, see [`skills/pto-toolbox/SKILL.md`](skills/pto-toolbox/SKILL.md) for which
 operations are read-only, which change machine configuration, and which have
 side effects that need explicit human confirmation.
+For the service, see its [security boundaries](pr-rerun-service/README.md#security-and-publishing).

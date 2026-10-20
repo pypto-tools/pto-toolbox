@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pr-rerun-service"
+version = "0.2.1"
+description = "Author-only, confirmed GitHub Actions reruns"
+readme = "docs/README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.115,<1",
+    "httpx>=0.28,<1",
+    "pydantic>=2.9,<3",
+    "starlette>=0.46,<2",
+    "uvicorn>=0.30,<1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<9", "ruff==0.14.8", "pyright==1.1.407", "build>=1,<2"]
+
+[project.scripts]
+pr-rerun = "pr_rerun.cli:main"
+pr-rerun-admin = "pr_rerun.admin:main"
+pr-rerun-server = "pr_rerun.api:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pyright]
+include = ["src", "tests"]
+extraPaths = ["src"]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.10"
+typeCheckingMode = "basic"
+

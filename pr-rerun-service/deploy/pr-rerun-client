@@ -1,0 +1,3 @@
+#!/bin/sh
+# Shared executable; login and configuration still belong to the invoking user.
+exec /opt/pr-rerun-client/bin/python -I -c 'import sys; sys.argv[0] = "pr-rerun"; from pr_rerun.cli import main; main()' "$@"
