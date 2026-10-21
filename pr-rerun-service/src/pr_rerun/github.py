@@ -15,7 +15,7 @@ from pr_rerun.models import Mode, ServiceError, UpstreamError, positive_id
 API = "https://api.github.com"
 MAX_BYTES = 8 * 1024 * 1024
 MAX_PAGES = 100
-# A fixed query is the only permitted POST besides the two rerun operations.
+# Fixed read-only queries are the only permitted POSTs besides the rerun operations.
 CHECK_QUERY = """
 query Checks($owner: String!, $repo: String!, $pr: Int!, $cursor: String) {
   repository(owner: $owner, name: $repo) {
@@ -37,6 +37,29 @@ query Checks($owner: String!, $repo: String!, $pr: Int!, $cursor: String) {
           }
         }
       }
+    }
+  }
+}
+"""
+
+# Fork workflow runs can omit their PR links. Query the full branch history,
+# including closed/merged PRs, rather than guessing from a shared commit SHA.
+HEAD_PULLS_QUERY = """
+query HeadPulls($owner: String!, $repo: String!, $head: String!, $cursor: String) {
+  repository(owner: $owner, name: $repo) {
+    nameWithOwner
+    pullRequests(headRefName: $head, states: [OPEN, CLOSED, MERGED], first: 100, after: $cursor) {
+      nodes {
+        number
+        state
+        headRefName
+        headRefOid
+        baseRefName
+        createdAt
+        headRepository { databaseId }
+        baseRepository { databaseId }
+      }
+      pageInfo { hasNextPage endCursor }
     }
   }
 }
@@ -84,7 +107,7 @@ class GitHub:
                 and not write
                 and path == "/graphql"
                 and payload is not None
-                and payload.get("query") == CHECK_QUERY
+                and payload.get("query") in (CHECK_QUERY, HEAD_PULLS_QUERY)
             )
         )
         if not authorized:
@@ -153,6 +176,57 @@ class GitHub:
 
     def run(self, run_id: int) -> dict:
         return self._json(f"{self.prefix}/actions/runs/{positive_id(run_id)}")
+
+    def head_pull_requests(self, head: str) -> list[dict]:
+        """Read every PR for this ref, in every state, before deciding uniqueness."""
+        owner, repo = self.repository.split("/")
+        cursor = None
+        cursors, numbers, result = set(), set(), []
+        for _ in range(MAX_PAGES):
+            response = self._json(
+                "/graphql",
+                {
+                    "query": HEAD_PULLS_QUERY,
+                    "variables": {"owner": owner, "repo": repo, "head": head, "cursor": cursor},
+                },
+            )
+            try:
+                if response.get("errors"):
+                    raise UpstreamError("Unable to read complete PR branch history.")
+                repository = response["data"]["repository"]
+                if repository["nameWithOwner"].lower() != self.repository.lower():
+                    raise UpstreamError("PR branch history belongs to a different repository.")
+                connection = repository["pullRequests"]
+                nodes, page = connection["nodes"], connection["pageInfo"]
+                if not isinstance(nodes, list) or len(nodes) > 100:
+                    raise UpstreamError("Invalid PR branch history page.")
+                for node in nodes:
+                    number = positive_id(node["number"])
+                    if number in numbers or node["headRefName"] != head:
+                        raise UpstreamError("PR branch history changed during pagination.")
+                    numbers.add(number)
+                    positive_id(node["baseRepository"]["databaseId"])
+                    if node["headRepository"] is not None:
+                        positive_id(node["headRepository"]["databaseId"])
+                    if (
+                        node["state"] not in {"OPEN", "CLOSED", "MERGED"}
+                        or not isinstance(node["baseRefName"], str)
+                        or not isinstance(node["createdAt"], str)
+                        or not isinstance(node["headRefOid"], (str, type(None)))
+                    ):
+                        raise UpstreamError("Invalid PR branch identity.")
+                    result.append(node)
+                if type(page["hasNextPage"]) is not bool:
+                    raise UpstreamError("Invalid PR branch pagination state.")
+                if not page["hasNextPage"]:
+                    return result
+                cursor = page["endCursor"]
+                if not isinstance(cursor, str) or not cursor or cursor in cursors:
+                    raise UpstreamError("Invalid or repeated PR branch pagination cursor.")
+                cursors.add(cursor)
+            except (KeyError, TypeError, AttributeError) as error:
+                raise UpstreamError("Unable to read complete PR branch history.") from error
+        raise UpstreamError("Too many PRs for this branch; ownership is ambiguous.")
 
     def _pages(self, path: str, key: str) -> Iterator[dict]:
         for page in range(1, MAX_PAGES + 1):

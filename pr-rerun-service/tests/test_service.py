@@ -8,7 +8,7 @@ from conftest import HEAD, REPO, confirm, preview
 from fastapi.testclient import TestClient
 
 from pr_rerun.api import create_app
-from pr_rerun.github import GitHub
+from pr_rerun.github import HEAD_PULLS_QUERY, GitHub
 from pr_rerun.models import ServiceError
 from pr_rerun.store import Store
 
@@ -295,11 +295,138 @@ def test_codex_manifest_cannot_route_another_pr(client, remote, identity):
     assert any("202" in reason and "verified" in reason for reason in plan["skipped"])
 
 
-def test_fork_without_ci_association_is_explicitly_excluded_but_codex_is_verified(client, remote):
+def test_fork_without_ci_link_uses_unique_branch_history_and_preserves_modes(client, remote):
     remote.runs[101]["pull_requests"] = []
     plan = preview(client)
-    assert [run["run_id"] for run in plan["runs"]] == [202]
-    assert any("101" in reason for reason in plan["skipped"])
+    assert [(run["run_id"], run["mode"]) for run in plan["runs"]] == [(101, "failed"), (202, "all")]
+    assert remote.head_queries == 1
+    assert not remote.writes
+    assert confirm(client, plan).json()["state"] == "accepted"
+    assert remote.head_queries == 3  # Preview, confirmation lookup, immediately before POST.
+    assert remote.writes == [
+        f"/repos/{REPO}/actions/runs/101/rerun-failed-jobs",
+        f"/repos/{REPO}/actions/runs/202/rerun",
+    ]
+
+
+@pytest.mark.parametrize(
+    "change",
+    ["source", "branch", "sha", "missing_source", "null_links", "event", "explicit_other_pr"],
+)
+def test_fork_fallback_never_overrides_other_run_identity(client, remote, change):
+    run = remote.runs[101]
+    run["pull_requests"] = []
+    if change == "source":
+        run["head_repository"]["id"] = 99
+    elif change == "branch":
+        run["head_branch"] = "someone-else"
+    elif change == "sha":
+        run["head_sha"] = "b" * 40
+    elif change == "missing_source":
+        run.pop("head_repository")
+    elif change == "null_links":
+        run["pull_requests"] = None
+    elif change == "event":
+        run["event"] = "push"
+    else:
+        run["pull_requests"] = [
+            {
+                "number": 999,
+                "head": {"sha": HEAD, "repo": {"id": 88}},
+                "base": {"ref": "main", "repo": {"id": 44}},
+            }
+        ]
+    plan = preview(client)
+    assert [item["run_id"] for item in plan["runs"]] == [202]
+    assert remote.head_queries == 0
+    assert not remote.writes
+
+
+@pytest.mark.parametrize("state", ["OPEN", "CLOSED", "MERGED"])
+def test_reused_branch_or_multiple_base_branches_remain_ambiguous(client, remote, state):
+    remote.runs[101]["pull_requests"] = []
+    other = dict(
+        remote.head_pull(), number=124, state=state, headRefOid="b" * 40, baseRefName="release"
+    )
+    remote.head_pulls = [remote.head_pull(), other]
+    plan = preview(client)
+    assert [item["run_id"] for item in plan["runs"]] == [202]
+    assert not remote.writes
+
+
+def test_same_ref_in_another_fork_does_not_change_source_identity(client, remote):
+    remote.runs[101]["pull_requests"] = []
+    other = dict(remote.head_pull(), number=124, headRepository={"databaseId": 99})
+    remote.head_pulls = [other, remote.head_pull()]
+    plan = preview(client)
+    assert [item["run_id"] for item in plan["runs"]] == [101, 202]
+
+
+def test_fork_without_matching_branch_history_is_excluded(client, remote):
+    remote.runs[101]["pull_requests"] = []
+    remote.head_pulls = []
+    plan = preview(client)
+    assert [item["run_id"] for item in plan["runs"]] == [202]
+    assert not remote.writes
+
+
+@pytest.mark.parametrize("timestamp", ["invalid", "2020-01-01T00:00:00"])
+def test_fork_identity_requires_valid_timezone_aware_timestamps(client, remote, timestamp):
+    remote.runs[101]["pull_requests"] = []
+    remote.head_pulls = [dict(remote.head_pull(), createdAt=timestamp)]
+    assert client.post("/api/reruns/preview", json={"pr": 123}).status_code == 502
+    assert not remote.writes
+
+
+@pytest.mark.parametrize("change", ["number", "state", "head", "base_ref", "base_repo", "newer_pr"])
+def test_fork_branch_history_must_match_current_pr(client, remote, change):
+    remote.runs[101]["pull_requests"] = []
+    candidate = remote.head_pull()
+    if change == "number":
+        candidate["number"] = 999
+    elif change == "state":
+        candidate["state"] = "CLOSED"
+    elif change == "head":
+        candidate["headRefOid"] = "b" * 40
+    elif change == "base_ref":
+        candidate["baseRefName"] = "release"
+    elif change == "base_repo":
+        candidate["baseRepository"]["databaseId"] = 55
+    else:
+        candidate["createdAt"] = "2099-01-01T00:00:00Z"
+    remote.head_pulls = [candidate]
+    plan = preview(client)
+    assert [item["run_id"] for item in plan["runs"]] == [202]
+    assert not remote.writes
+
+
+def test_branch_history_is_rechecked_immediately_before_rerun(client, remote):
+    remote.runs[101]["pull_requests"] = []
+    plan = preview(client)
+
+    def add_another_pr_after_confirmation_lookup(request):
+        if (
+            request.url.path == "/graphql"
+            and json.loads(request.content)["query"] == HEAD_PULLS_QUERY
+        ):
+            if remote.head_queries == 2:
+                remote.head_pulls = [remote.head_pull(), dict(remote.head_pull(), number=124)]
+
+    remote.on_call = add_another_pr_after_confirmation_lookup
+    assert confirm(client, plan).json()["state"] == "rejected"
+    assert remote.head_queries == 3
+    assert not remote.writes
+
+
+@pytest.mark.parametrize("status,conclusion", [("in_progress", None), ("completed", "success")])
+def test_fork_fallback_does_not_rerun_active_or_successful_attempts(
+    client, remote, status, conclusion
+):
+    remote.runs[101].update(pull_requests=[], status=status, conclusion=conclusion, run_attempt=2)
+    plan = preview(client)
+    assert [item["run_id"] for item in plan["runs"]] == [202]
+    assert any("101" in reason and "verified" not in reason for reason in plan["skipped"])
+    assert not remote.writes
 
 
 def test_unrelated_repository_run_never_reaches_rerun(client, remote):

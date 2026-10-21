@@ -18,6 +18,11 @@ English | [中文](README.zh-CN.md) | [Full operator guide](docs/README.md)
 - Remote listeners bind to the local NetBird IP **and interface**. A separate
   loopback listener serves clients on the server host. Discovery failures abort startup.
 
+
+Fork CI runs with empty GitHub PR links are supported only when source identity
+and the complete branch history uniquely identify the requested PR. Reused or
+ambiguous branches remain excluded; checks run again before each rerun.
+
 ## Server setup
 
 Requires Python 3.10+, Linux, a connected NetBird kernel interface, `ip` from

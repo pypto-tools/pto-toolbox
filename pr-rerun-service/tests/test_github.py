@@ -7,7 +7,7 @@ import httpx
 import pytest
 from conftest import HEAD, REPO, archive
 
-from pr_rerun.github import CHECK_QUERY, GitHub
+from pr_rerun.github import CHECK_QUERY, HEAD_PULLS_QUERY, GitHub
 from pr_rerun.models import ServiceError, UpstreamError
 
 
@@ -151,6 +151,99 @@ def test_jobs_paginate_and_pin_attempt():
     assert len(github.jobs(101, 3)) == 101
     assert len(urls) == 2
     github.close()
+
+
+def test_branch_history_includes_all_states_and_drains_later_pages(remote):
+    cursors = []
+
+    def respond(request):
+        body = json.loads(request.content)
+        assert body["query"] == HEAD_PULLS_QUERY
+        assert "states: [OPEN, CLOSED, MERGED]" in body["query"]
+        cursors.append(body["variables"]["cursor"])
+        data = remote(request).json()
+        connection = data["data"]["repository"]["pullRequests"]
+        if body["variables"]["cursor"] is None:
+            connection["pageInfo"] = {"hasNextPage": True, "endCursor": "next"}
+        else:
+            connection["nodes"] = [dict(remote.head_pull(), number=124, state="CLOSED")]
+        return httpx.Response(200, json=data)
+
+    github = GitHub(REPO, "github-test-token", httpx.MockTransport(respond))
+    try:
+        assert [item["number"] for item in github.head_pull_requests("feature")] == [123, 124]
+        assert cursors == [None, "next"]
+    finally:
+        github.close()
+
+
+@pytest.mark.parametrize(
+    "problem", ["repository", "errors", "page_state", "cursor", "missing_base", "duplicate"]
+)
+def test_branch_history_fails_closed_on_incomplete_or_invalid_data(remote, problem):
+    def respond(request):
+        data = remote(request).json()
+        repository = data["data"]["repository"]
+        connection = repository["pullRequests"]
+        if problem == "repository":
+            repository["nameWithOwner"] = "other/repo"
+        elif problem == "errors":
+            data["errors"] = [{"message": "partial data"}]
+        elif problem == "page_state":
+            connection["pageInfo"]["hasNextPage"] = "false"
+        elif problem == "cursor":
+            connection["pageInfo"] = {"hasNextPage": True, "endCursor": None}
+        elif problem == "missing_base":
+            connection["nodes"][0].pop("baseRepository")
+        else:
+            connection["nodes"].append(connection["nodes"][0])
+        return httpx.Response(200, json=data)
+
+    github = GitHub(REPO, "github-test-token", httpx.MockTransport(respond))
+    try:
+        with pytest.raises(UpstreamError):
+            github.head_pull_requests("feature")
+        assert not remote.writes
+    finally:
+        github.close()
+
+
+def test_branch_history_never_returns_partial_result_when_later_page_fails(remote):
+    def respond(request):
+        if json.loads(request.content)["variables"]["cursor"] is not None:
+            return httpx.Response(200, json={"data": None, "errors": [{"message": "rate limit"}]})
+        data = remote(request).json()
+        data["data"]["repository"]["pullRequests"]["pageInfo"] = {
+            "hasNextPage": True,
+            "endCursor": "next",
+        }
+        return httpx.Response(200, json=data)
+
+    github = GitHub(REPO, "github-test-token", httpx.MockTransport(respond))
+    try:
+        with pytest.raises(UpstreamError, match="complete"):
+            github.head_pull_requests("feature")
+    finally:
+        github.close()
+
+
+def test_branch_history_page_limit_never_returns_a_partial_identity(remote, monkeypatch):
+    monkeypatch.setattr("pr_rerun.github.MAX_PAGES", 1)
+
+    def respond(request):
+        data = remote(request).json()
+        data["data"]["repository"]["pullRequests"]["pageInfo"] = {
+            "hasNextPage": True,
+            "endCursor": "next",
+        }
+        return httpx.Response(200, json=data)
+
+    github = GitHub(REPO, "github-test-token", httpx.MockTransport(respond))
+    try:
+        with pytest.raises(UpstreamError, match="Too many"):
+            github.head_pull_requests("feature")
+    finally:
+        github.close()
 
 
 def test_graphql_paginates_checks_without_arbitrary_queries(remote):

@@ -2,7 +2,7 @@ import copy
 import io
 import json
 import zipfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from pr_rerun.api import create_app
-from pr_rerun.github import CHECK_QUERY, GitHub
+from pr_rerun.github import CHECK_QUERY, HEAD_PULLS_QUERY, GitHub
 from pr_rerun.models import Settings
 
 REPO = "hw-native-sys/pypto"
@@ -44,6 +44,8 @@ class Remote:
         self.calls = []
         self.fail_write = None
         self.graph_head = HEAD
+        self.head_pulls = None
+        self.head_queries = 0
         self.manifest = {"repository": REPO, "number": 123, "head": HEAD, "base_ref": "main"}
         self.on_call = None
 
@@ -67,9 +69,23 @@ class Remote:
             if workflow == "ci"
             else [],
             "head_sha": HEAD,
+            "head_branch": "feature",
+            "head_repository": {"id": 88},
             "status": "completed",
             "conclusion": "failure",
             "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    def head_pull(self):
+        return {
+            "number": self.pr["number"],
+            "state": self.pr["state"].upper(),
+            "headRefName": self.pr["head"]["ref"],
+            "headRefOid": self.pr["head"]["sha"],
+            "baseRefName": self.pr["base"]["ref"],
+            "createdAt": (datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),
+            "headRepository": {"databaseId": self.pr["head"]["repo"]["id"]},
+            "baseRepository": {"databaseId": self.pr["base"]["repo"]["id"]},
         }
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
@@ -82,6 +98,27 @@ class Remote:
         path = request.url.path
         if path == "/graphql":
             body = json.loads(request.content)
+            if body["query"] == HEAD_PULLS_QUERY:
+                self.head_queries += 1
+                assert body["variables"]["head"] == self.pr["head"]["ref"]
+                return httpx.Response(
+                    200,
+                    json={
+                        "data": {
+                            "repository": {
+                                "nameWithOwner": REPO,
+                                "pullRequests": {
+                                    "nodes": copy.deepcopy(
+                                        [self.head_pull()]
+                                        if self.head_pulls is None
+                                        else self.head_pulls
+                                    ),
+                                    "pageInfo": {"hasNextPage": False, "endCursor": None},
+                                },
+                            }
+                        }
+                    },
+                )
             assert body["query"] == CHECK_QUERY
             assert body["variables"]["pr"] == 123
             checks = [

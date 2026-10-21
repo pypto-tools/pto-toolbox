@@ -8,10 +8,10 @@ when explicitly reusing a GitHub CLI login.
 
 [中文使用说明](README.zh-CN.md)
 
-Version `0.2.1` fixes double decoding of GitHub gzip/deflate responses, which could
-report `GitHub connection failed` during valid user lookups. Restart an already
-running server after upgrading; administrator commands use the fix on their next
-invocation. The database, issued tokens, and saved client logins are preserved.
+Version `0.2.2` verifies ordinary fork runs whose GitHub PR links are empty.
+It checks source repository, branch, SHA, timestamps, and the complete PR branch
+history before allowing a rerun. Restart the server after upgrading; existing
+client logins and service tokens remain valid, and clients do not need an upgrade.
 
 ## Behavior
 
@@ -420,10 +420,19 @@ No automatic retention cleanup is implemented; operators should monitor disk usa
 
 ## PR identity and limits
 
-Ordinary workflows require an explicit PR association matching number, source
-repository, head SHA, target repository, and base branch.
-Some fork runs expose no such association. Those runs are explicitly excluded;
-matching a SHA or branch alone is not sufficient evidence.
+Ordinary workflows first use explicit PR associations matching number, source
+repository, head SHA, target repository, and base branch. GitHub can return empty
+PR links for fork runs. For those runs only, the service additionally verifies
+`pull_request` event type, source repository ID, source branch, and current SHA.
+A paginated GraphQL lookup of that branch across **open, closed, and merged PRs**
+must identify exactly one PR from that source repository, matching the requested
+PR, current target branch/repository, and current SHA. The PR must predate the run.
+All pages must be read successfully, and the check is repeated before each POST.
+
+Reused branches and branches used for multiple PRs remain ambiguous and are
+excluded, even if another PR is closed or has a different SHA/base branch.
+Explicit links to another PR are never overridden. Matching a SHA or branch alone
+is not sufficient evidence. Codex runs still require their trusted artifact.
 
 The `codex_manifest` rule supports PyPTO's existing trusted `pull_request_target`
 workflow. It reads the newest unexpired `codex-target-{run}-{attempt}` artifact,

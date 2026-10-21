@@ -75,16 +75,55 @@ class Planner:
             )
         if run["event"] != "pull_request":
             return False
-        # Shared commit/branch names alone do not prove which PR was triggered.
-        # Missing evidence is reported rather than guessed.
-        return any(
-            link["number"] == pr.number
-            and link["head"]["sha"] == pr.head_sha
-            and link["head"]["repo"]["id"] == pr.head_repository_id
-            and link["base"]["repo"]["id"] == pr.repository_id
-            and link["base"]["ref"] == pr.base_ref
-            for link in run["pull_requests"]
-        )
+        links = run.get("pull_requests")
+        if not isinstance(links, list):
+            return False
+        if links:
+            # An explicit link to another PR must never be overridden by fallback.
+            return any(
+                link["number"] == pr.number
+                and link["head"]["sha"] == pr.head_sha
+                and link["head"]["repo"]["id"] == pr.head_repository_id
+                and link["base"]["repo"]["id"] == pr.repository_id
+                and link["base"]["ref"] == pr.base_ref
+                for link in links
+            )
+        head_repository = run.get("head_repository")
+        if (
+            not isinstance(head_repository, dict)
+            or head_repository.get("id") != pr.head_repository_id
+            or run.get("head_branch") != pr.head_ref
+            or run.get("head_sha") != pr.head_sha
+        ):
+            return False
+        # SHA/ref alone is insufficient. The same source repository and branch
+        # must have exactly one PR in this target, including all closed/merged
+        # history. Reused branches and multiple target branches remain ambiguous.
+        candidates = [
+            candidate
+            for candidate in self.github.head_pull_requests(pr.head_ref)
+            if candidate["headRepository"] is not None
+            and candidate["headRepository"]["databaseId"] == pr.head_repository_id
+        ]
+        if len(candidates) != 1:
+            return False
+        candidate = candidates[0]
+        if (
+            candidate["number"] != pr.number
+            or candidate["state"] != "OPEN"
+            or candidate["headRefOid"] != pr.head_sha
+            or candidate["baseRefName"] != pr.base_ref
+            or candidate["baseRepository"]["databaseId"] != pr.repository_id
+        ):
+            return False
+        try:
+            pr_created = datetime.fromisoformat(candidate["createdAt"].replace("Z", "+00:00"))
+            run_created = datetime.fromisoformat(run["created_at"].replace("Z", "+00:00"))
+            if pr_created.tzinfo is None or run_created.tzinfo is None:
+                raise ValueError("Missing timezone")
+        except (KeyError, TypeError, ValueError, AttributeError) as error:
+            raise UpstreamError("Invalid PR/run identity timestamp.") from error
+        return pr_created <= run_created
 
     def build(self, principal: Principal, number: int) -> Plan:
         pr = self.pull(principal, number)
