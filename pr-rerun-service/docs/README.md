@@ -8,10 +8,12 @@ when explicitly reusing a GitHub CLI login.
 
 [中文使用说明](README.zh-CN.md)
 
-Version `0.2.2` verifies ordinary fork runs whose GitHub PR links are empty.
-It checks source repository, branch, SHA, timestamps, and the complete PR branch
-history before allowing a rerun. Restart the server after upgrading; existing
-client logins and service tokens remain valid, and clients do not need an upgrade.
+Version `0.2.3` includes failed or timed-out jobs inside a completed, cancelled
+workflow run. Cancellation alone remains ineligible. Failed jobs are checked
+again immediately before each rerun. Restart the server after upgrading;
+existing client logins and service tokens remain valid, and clients do not need
+an upgrade. Version `0.2.2` added attribution checks for ordinary fork runs whose
+GitHub PR links are empty.
 
 ## Behavior
 
@@ -24,10 +26,12 @@ client logins and service tokens remain valid, and clients do not need an upgrad
 5. The service rechecks the PR and run attempts and requests the approved reruns.
 
 Ordinary CI/Docs failures use `rerun-failed-jobs`. The configured Codex Review
-workflow uses `rerun` (all jobs in that workflow run). Successful, cancelled,
-skipped, approval-required, active, and more-than-30-day-old runs are excluded.
-Timeout failures are included. A newer successful/active run supersedes an older
-failed run of the same workflow.
+workflow uses `rerun` (all jobs in that workflow run). A completed, cancelled
+run is also eligible if its current attempt contains failed or timed-out jobs;
+cancelled jobs alone never qualify. Successful, skipped, approval-required,
+active, and more-than-30-day-old runs are excluded. Failed jobs are checked again
+before each rerun. The newest verified run of a workflow supersedes its older
+runs, even if the newest run has no eligible failures.
 
 The CLI requires a terminal and has no `--yes` option. A service cannot prove a
 human actually read a preview: API callers can automate the two-step protocol.

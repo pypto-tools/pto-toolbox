@@ -10,6 +10,7 @@ English | [中文](README.zh-CN.md) | [Full operator guide](docs/README.md)
 
 - Ordinary CI failures rerun failed jobs. The configured Codex Review workflow
   reruns all jobs in that workflow, after verifying its PR identity artifact.
+  Completed cancelled runs qualify only if they contain failed or timed-out jobs.
 - Each contributor receives a separate service token bound to their immutable
   GitHub user ID. Contributors need neither repository write access nor a `gh` login.
 - The server uses the administrator's saved `gh` login or a dedicated GitHub token.

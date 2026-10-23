@@ -48,6 +48,7 @@ class Remote:
         self.head_queries = 0
         self.manifest = {"repository": REPO, "number": 123, "head": HEAD, "base_ref": "main"}
         self.on_call = None
+        self.job_overrides = {}
 
     def run(self, run_id: int, workflow: str) -> dict:
         return {
@@ -172,13 +173,16 @@ class Remote:
                 return httpx.Response(
                     200,
                     json={
-                        "jobs": [
-                            {
-                                "id": run_id * 10,
-                                "name": "review" if run_id == 202 else "unit-tests",
-                                "conclusion": "failure",
-                            }
-                        ]
+                        "jobs": self.job_overrides.get(
+                            run_id,
+                            [
+                                {
+                                    "id": run_id * 10,
+                                    "name": "review" if run_id == 202 else "unit-tests",
+                                    "conclusion": "failure",
+                                }
+                            ],
+                        )
                     },
                 )
             if path == f"{prefix}/artifacts":

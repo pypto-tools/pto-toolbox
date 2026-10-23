@@ -16,6 +16,9 @@ from pr_rerun.models import (
 )
 
 FAILURES = {"failure", "timed_out"}
+# A cancelled workflow can still contain failed jobs. Job conclusions, checked
+# below, decide eligibility; cancellation by itself is never enough.
+RERUN_CONCLUSIONS = FAILURES | {"cancelled"}
 
 
 class Planner:
@@ -155,7 +158,7 @@ class Planner:
             if created <= cutoff:
                 skipped.append(f"Run {run_id}: outside GitHub's 30-day rerun window.")
                 continue
-            if run["status"] != "completed" or run["conclusion"] not in FAILURES:
+            if run["status"] != "completed" or run["conclusion"] not in RERUN_CONCLUSIONS:
                 skipped.append(f"Run {run_id}: {run['status']} / {run['conclusion'] or 'pending'}.")
                 continue
             if self.rules[path].identity == "codex_manifest" and pr.draft:
@@ -200,7 +203,11 @@ class Planner:
             or current["workflow_id"] != run.workflow_id
             or current["run_attempt"] != run.attempt
             or current["status"] != "completed"
-            or current["conclusion"] not in FAILURES
+            or current["conclusion"] not in RERUN_CONCLUSIONS
             or not self.matches(current, plan.pr, rule)
         ):
             raise ServiceError(409, "Workflow state changed after confirmation.")
+        jobs = self.github.jobs(run.run_id, run.attempt)
+        failed = tuple(sorted(job["name"] for job in jobs if job["conclusion"] in FAILURES))
+        if not failed or failed != run.failed_jobs:
+            raise ServiceError(409, "Failed jobs changed after confirmation.")

@@ -7,10 +7,10 @@ umask 022
 usage() {
     cat <<'HELP'
 Usage: install-shared-client.sh [--dry-run]
-Install the built 0.2.2 wheel for all OS users using system Python 3.10+.
+Install the built 0.2.3 wheel for all OS users using system Python 3.10+.
   -h, --help     Show this help without changing anything.
   --dry-run      Show the planned paths without installing anything.
-Build dist/pr_rerun_service-0.2.2-py3-none-any.whl first.
+Build dist/pr_rerun_service-0.2.3-py3-none-any.whl first.
 An optional dist/shared-client-wheelhouse supplies offline dependencies;
 otherwise dependencies are downloaded from PyPI under requirements.lock.
 Existing public commands or runtime directories are never overwritten.
@@ -36,7 +36,7 @@ fi
 
 deployment_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 project_dir="$(dirname -- "$deployment_dir")"
-wheel="$project_dir/dist/pr_rerun_service-0.2.2-py3-none-any.whl"
+wheel="$project_dir/dist/pr_rerun_service-0.2.3-py3-none-any.whl"
 wheelhouse="$project_dir/dist/shared-client-wheelhouse"
 destination=/opt/pr-rerun-client
 command_path=/usr/local/bin/pr-rerun
