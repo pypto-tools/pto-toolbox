@@ -66,23 +66,14 @@ Local unit files are ignored by Git.
 
 ## Shared client installation
 
-Each client machine can have one root-owned installation for all its OS users.
-First build the wheel from the source on that machine:
+Use the [standalone client release guide](docs/client-releases.md). GitHub Releases
+provides ARM64 and x86_64 packages with their own Python runtime; the bootstrap
+installer works with system Python 3.9+. Install once per machine, then update with
+`sudo pr-rerun-update`. Each user keeps their own login and aliases.
 
-```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install -c requirements-dev.lock ".[dev]"
-.venv/bin/python -m build --wheel
-
-bash deploy/install-shared-client.sh --dry-run
-sudo bash deploy/install-shared-client.sh
-```
-
-The installer uses the system Python under `/opt/pr-rerun-client` and publishes
-`/usr/local/bin/pr-rerun`. It refuses to overwrite an existing installation.
-Optional offline wheels belong in `dist/shared-client-wheelhouse/` and must match
-the destination's Python version and architecture. Otherwise dependencies come
-from PyPI under `requirements.lock`. No wheel bundles are committed here.
+For developers who need a source-based installation, the legacy
+`deploy/install-shared-client.sh` still installs a locally built wheel using
+`/usr/bin/python3` (3.10+). It is not required for standalone releases.
 
 ## Contributor usage
 
@@ -90,8 +81,8 @@ Use your own normal OS account, **without sudo**. The address below is an exampl
 replace it with the service host's NetBird IP supplied by the administrator.
 
 ```bash
-pr-rerun login --token-login --netbird-server http://100.64.0.10:8080
-# Enter your personal service token at the hidden prompt.
+pr-rerun login --netbird-server http://100.64.0.10:8080 --repo pypto
+# Complete GitHub device authorization; pypto is a configured official alias.
 
 # Subsequent invocations, including in new terminals:
 pr-rerun 123

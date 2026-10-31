@@ -60,22 +60,12 @@ pr-rerun-server --github-auth gh --port 8080
 
 ## 全机共享客户端
 
-每台客户端机器可以由管理员安装一份 root 所有的程序，供该机器所有系统用户使用。
-先在目标机器从源码构建安装包：
+推荐使用[独立客户端发布指南](docs/client-releases.zh-CN.md)。GitHub Releases 提供
+ARM64 和 x86_64 安装包，自带 Python 运行环境，首次安装器兼容系统 Python 3.9 以上。
+每台机器安装一次，之后用 `sudo pr-rerun-update` 更新，各用户保留自己的登录和别名。
 
-```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install -c requirements-dev.lock ".[dev]"
-.venv/bin/python -m build --wheel
-
-bash deploy/install-shared-client.sh --dry-run
-sudo bash deploy/install-shared-client.sh
-```
-
-安装脚本使用系统 Python，在 `/opt/pr-rerun-client` 建立运行环境，
-将公共命令放到 `/usr/local/bin/pr-rerun`，拒绝覆盖已有安装。
-可将匹配目标 Python 和架构的离线依赖放在 `dist/shared-client-wheelhouse/`；
-否则按 `requirements.lock` 约束从 PyPI 安装。生成的离线包不提交到仓库。
+开发者仍可使用旧 `deploy/install-shared-client.sh` 安装本地构建的 wheel，
+该路径要求 `/usr/bin/python3` 为 3.10 以上。独立客户端无需运行这个旧脚本。
 
 ## 用户使用
 
@@ -83,8 +73,8 @@ sudo bash deploy/install-shared-client.sh
 服务端 NetBird IP：
 
 ```bash
-pr-rerun login --token-login --netbird-server http://100.64.0.10:8080
-# 按隐藏输入提示粘贴个人服务令牌。
+pr-rerun login --netbird-server http://100.64.0.10:8080 --repo pypto
+# 按提示完成 GitHub 设备授权；pypto 是已配置的官方别名。
 
 # 之后包括新开终端，直接指定 PR：
 pr-rerun 123

@@ -47,11 +47,12 @@ chmod +x netbird-preflight.sh
 每个工具都支持 `--help`。**跑任何会写入的操作之前，先读该工具自己的 README。**
 
 PR 重跑服务请先看[安装和使用说明](pr-rerun-service/README.zh-CN.md)。
-客户端安装后，每人使用管理员发放的个人服务令牌登录一次即可。
+使用[独立客户端安装包](pr-rerun-service/docs/client-releases.zh-CN.md)完成全机安装，
+之后用 `sudo pr-rerun-update` 更新。每人使用自己的 GitHub 账户登录一次即可。
 `100.64.0.10` 是示例地址，需要换成实际服务端的 NetBird IP：
 
 ```bash
-pr-rerun login --token-login --netbird-server http://100.64.0.10:8080
+pr-rerun login --netbird-server http://100.64.0.10:8080 --repo pypto
 pr-rerun 123
 ```
 

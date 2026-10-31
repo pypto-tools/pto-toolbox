@@ -408,6 +408,9 @@ def main() -> None:
     if len(sys.argv) > 1 and sys.argv[1] == "alias":
         raise SystemExit(aliases.main(sys.argv[2:], official_alias_command))
     parser = argparse.ArgumentParser(description="Preview and confirm reruns for your own PRs")
+    from pr_rerun.version import VERSION
+
+    parser.add_argument("--version", action="version", version=f"pr-rerun {VERSION}")
     parser.add_argument(
         "target", help="PR number, 'login', 'logout', 'status', 'policy', or 'alias'"
     )

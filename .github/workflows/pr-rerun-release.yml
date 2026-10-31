@@ -1,0 +1,120 @@
+name: PR rerun release
+
+on:
+  pull_request:
+    paths: ['pr-rerun-service/**', '.github/workflows/pr-rerun-release.yml']
+  push:
+    branches: [main]
+    tags: ['pr-rerun-v*']
+    paths: ['pr-rerun-service/**', '.github/workflows/pr-rerun-release.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test and build the server package
+        working-directory: pr-rerun-service
+        run: |
+          python -m pip install -r requirements-dev.lock
+          python -m pytest tests
+          ruff check src tests release
+          ruff format --check src tests release
+          pyright
+          python -m build --wheel
+      - run: bash tests/smoke.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr-rerun-server
+          path: pr-rerun-service/dist/*.whl
+          if-no-files-found: error
+
+  client:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build against glibc 2.28 on the native architecture
+        env:
+          ARCH: ${{ matrix.arch }}
+          RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+        run: |
+          docker run --rm -v "$PWD:/workspace" -w /workspace/pr-rerun-service \
+            -e RELEASE_TAG -e GITHUB_SHA \
+            "quay.io/pypa/manylinux_2_28_${ARCH}" bash -euc '
+              /opt/python/cp312-cp312/bin/python -m venv /tmp/client-build
+              /tmp/client-build/bin/python -m pip install -r release/requirements-build.lock
+              /tmp/client-build/bin/python release/build_client.py
+              cd dist
+              sha256sum pr-rerun-client-*.tar.gz > SHA256SUMS
+              /opt/python/cp39-cp39/bin/python ../release/client_install.py \
+                --bundle "pr-rerun-client-linux-$(uname -m).tar.gz" --checksums SHA256SUMS
+              /usr/local/bin/pr-rerun --version
+              /usr/local/bin/pr-rerun-update --help
+              /usr/local/bin/pr-rerun-update --dry-run
+              /opt/python/cp39-cp39/bin/python ../tests/check_frozen_client.py /usr/local/bin/pr-rerun
+            '
+      - name: Verify the portable bundle on the runner
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          sudo python3 pr-rerun-service/release/client_install.py \
+            --bundle "pr-rerun-service/dist/pr-rerun-client-linux-${ARCH}.tar.gz" \
+            --checksums pr-rerun-service/dist/SHA256SUMS
+          pr-rerun --version
+          pr-rerun-update --help
+          # Test a normal user invoking a root-owned installation.
+          pr-rerun alias list
+          python3 pr-rerun-service/tests/check_frozen_client.py /usr/local/bin/pr-rerun
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr-rerun-client-${{ matrix.arch }}
+          path: pr-rerun-service/dist/pr-rerun-client-*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/pr-rerun-v')
+    needs: [test, client]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: pr-rerun-*
+          merge-multiple: true
+          path: release-assets
+      - name: Prepare versioned assets
+        run: |
+          cp pr-rerun-service/release/client_install.py release-assets/install-client.py
+          cd release-assets
+          sha256sum *.tar.gz *.whl install-client.py > SHA256SUMS
+      - name: Publish only after both architectures and tests pass
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" release-assets/* \
+            --verify-tag --title "PR rerun ${RELEASE_TAG#pr-rerun-v}" \
+            --notes-file "pr-rerun-service/docs/releases/${RELEASE_TAG#pr-rerun-v}.md" --latest

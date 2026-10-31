@@ -88,6 +88,12 @@ check "systemd installer requires explicit unit" 2 bash "$P/install-systemd.sh"
 check "systemd installer --dry-run" 0 bash "$P/install-systemd.sh" --dry-run "$P/pr-rerun.service"
 check "App systemd installer --dry-run" 0 bash "$P/install-systemd.sh" --dry-run "$P/pr-rerun-app.service"
 check "shared launcher syntax" 0 sh -n "$P/pr-rerun-client"
+R="$ROOT/pr-rerun-service/release/client_install.py"
+check "release installer --help" 0 python3 "$R" --help
+check "release installer rejects unknown flag" 2 python3 "$R" --bogus
+check "release installer --dry-run" 0 python3 "$R" --dry-run --prefix "$TMP/releases" --bin-dir "$TMP/bin"
+if [ ! -e "$TMP/releases" ] && [ ! -e "$TMP/bin" ]; then ok "release dry-run created no paths"
+else bad "release dry-run changed installation paths"; fi
 
 echo
 printf '\n%d passed, %d failed\n' "$pass" "$fail"

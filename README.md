@@ -52,11 +52,12 @@ Every tool answers `--help`. Read the tool's own README before running anything
 that writes.
 
 For the rerun service, start with its [installation and usage guide](pr-rerun-service/README.md).
-Once a client is installed, each user logs in once with a service token issued
-by the administrator. `100.64.0.10` is an example, not a deployed service address:
+Use the [standalone client packages](pr-rerun-service/docs/client-releases.md)
+for shared installation and `sudo pr-rerun-update` for updates. Each user logs in
+once with their own GitHub account. `100.64.0.10` is an example, not a deployed service address:
 
 ```bash
-pr-rerun login --token-login --netbird-server http://100.64.0.10:8080
+pr-rerun login --netbird-server http://100.64.0.10:8080 --repo pypto
 pr-rerun 123
 ```
 
