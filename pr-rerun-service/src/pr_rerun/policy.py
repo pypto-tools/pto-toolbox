@@ -2,6 +2,7 @@
 
 import json
 import re
+import sqlite3
 from typing import Annotated, Literal
 
 from pydantic import Field, field_validator, model_validator
@@ -11,6 +12,7 @@ from pr_rerun.store import Store
 
 RepositoryName = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+$")]
 UserID = Annotated[int, Field(gt=0, lt=2**63)]
+AliasName = Annotated[str, Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,31}$")]
 
 
 def repository_name(value: str) -> str:
@@ -24,6 +26,7 @@ class RepositoryPolicy(StrictModel):
     maintainers: list[UserID] = Field(min_length=1, max_length=100)
     users: list[UserID] = Field(default_factory=list, max_length=1000)
     access: Literal["explicit_users", "authenticated_users"] = "explicit_users"
+    aliases: list[AliasName] = Field(default_factory=list, max_length=20)
     allow_drafts: bool = False
     base_branches: list[str] = Field(default_factory=lambda: ["main"], min_length=1, max_length=100)
     workflows: list[WorkflowRule] = Field(min_length=1, max_length=100)
@@ -42,6 +45,8 @@ class RepositoryPolicy(StrictModel):
 
     @model_validator(mode="after")
     def unique_rules(self):
+        if len(set(self.aliases)) != len(self.aliases):
+            raise ValueError("Repository aliases must be unique")
         if len({rule.path for rule in self.workflows}) != len(self.workflows):
             raise ValueError("Workflow paths must be unique")
         if len(set(self.maintainers)) != len(self.maintainers) or len(set(self.users)) != len(
@@ -71,6 +76,9 @@ class PolicyStore:
                     actor INTEGER NOT NULL, created REAL NOT NULL, policy TEXT NOT NULL,
                     PRIMARY KEY(repository, revision)
                 );
+                CREATE TABLE IF NOT EXISTS repository_aliases (
+                    alias TEXT PRIMARY KEY, repository TEXT NOT NULL
+                );
             """)
 
     def get(self, name: str) -> dict:
@@ -81,6 +89,41 @@ class PolicyStore:
         if row is None:
             raise ServiceError(404, "Repository is not enrolled.")
         return {**dict(row), "policy": RepositoryPolicy.model_validate_json(row["policy"])}
+
+    @staticmethod
+    def replace_aliases(db, name: str, aliases: list[str]) -> None:
+        db.execute("DELETE FROM repository_aliases WHERE repository=?", (name,))
+        try:
+            db.executemany(
+                "INSERT INTO repository_aliases VALUES (?, ?)", [(alias, name) for alias in aliases]
+            )
+        except sqlite3.IntegrityError:
+            raise ServiceError(
+                409, "An official alias is already assigned to another repository."
+            ) from None
+
+    def aliases(self, principal: Principal) -> dict[str, str]:
+        result = {}
+        with self.store.connection() as db:
+            rows = db.execute(
+                "SELECT a.alias, a.repository, r.policy FROM repository_aliases a "
+                "JOIN repositories r ON r.name=a.repository ORDER BY a.alias"
+            ).fetchall()
+        for row in rows:
+            policy = RepositoryPolicy.model_validate_json(row["policy"])
+            try:
+                self.authorize({"policy": policy}, principal)
+            except ServiceError:
+                continue
+            result[row["alias"]] = row["repository"]
+        return result
+
+    def resolve_alias(self, alias: str, principal: Principal) -> str:
+        # Both listing and resolution hide inaccessible or disabled repositories.
+        value = self.aliases(principal).get(alias)
+        if value is None:
+            raise ServiceError(404, "Official alias is unavailable for your account.")
+        return value
 
     @staticmethod
     def authorize(record: dict, principal: Principal, *, manage: bool = False) -> None:
@@ -103,6 +146,7 @@ class PolicyStore:
                 "INSERT INTO repositories VALUES (?, ?, ?, 1, ?)",
                 (name, repository_id, installation_id, policy.model_dump_json()),
             )
+            self.replace_aliases(db, name, policy.aliases)
             db.execute(
                 "INSERT INTO policy_history VALUES (?, 1, 0, ?, ?)",
                 (name, self.store.clock(), policy.model_dump_json()),
@@ -123,6 +167,7 @@ class PolicyStore:
             if row["revision"] != update.expected_revision:
                 raise ServiceError(409, "Policy changed; fetch it again before updating.")
             revision = row["revision"] + 1
+            self.replace_aliases(db, name, update.policy.aliases)
             db.execute(
                 "UPDATE repositories SET policy=?, revision=? WHERE name=?",
                 (update.policy.model_dump_json(), revision, name),

@@ -227,6 +227,14 @@ def create_app(
             raise ServiceError(404, "Repository policy management requires App mode.")
         return service
 
+    @app.get("/api/repository-aliases")
+    def official_aliases(actor: Annotated[Principal, Depends(principal)]):
+        return {"aliases": registry().policies.aliases(actor)}
+
+    @app.get("/api/repository-aliases/{alias}")
+    def resolve_alias(alias: str, actor: Annotated[Principal, Depends(principal)]):
+        return {"repository": registry().policies.resolve_alias(alias, actor)}
+
     @app.get("/api/repositories/{owner}/{repo}/policy")
     def policy(owner: str, repo: str, actor: Annotated[Principal, Depends(principal)]):
         return registry().policy(f"{owner}/{repo}", actor)

@@ -265,3 +265,35 @@ and survive login/logout. `--repo`, `PR_RERUN_REPOSITORY`, login and policy comm
 accept aliases. Login saves the expanded repository name, so remapping an alias
 later does not silently change the saved default. Previews and confirmation still
 show the full repository name. Server-side grants and author checks remain unchanged.
+
+## Official repository aliases (server and client 0.3.2)
+
+A repository maintainer can publish official aliases for that repository:
+
+```bash
+pr-rerun alias set pypto hw-native-sys/pypto --official
+pr-rerun alias list --official
+pr-rerun 123 --repo pypto
+pr-rerun alias remove pypto --repo hw-native-sys/pypto --official
+```
+
+Official aliases are the `aliases` list in the repository policy. They are
+case-sensitive, unique across the server, limited to 20 per repository and updated
+with the same authorization, revision checks and audit history as other policy
+fields. A conflicting assignment returns an error and leaves both policies intact.
+Changes invalidate existing previews. Removal requires a full repository name;
+maintainers cannot redirect another repository's alias. List/resolve endpoints
+require login and expose only enabled repositories available to that account.
+Disabled repositories retain their reserved aliases until a maintainer removes them.
+
+Resolution order: a full `owner/repo` name, then a local alias, then an official
+alias from the selected server. Local aliases override matching official names;
+use `alias list --official` to inspect server definitions. The CLI prints the
+expanded name, and previews and confirmation always show the full repository.
+Official aliases are resolved after authentication, including during GitHub login,
+and are never cached across servers. Saved defaults retain the expanded name.
+Existing local-only alias commands continue to work without server access.
+
+Upgrade the server as well as clients for official aliases. Back up the stopped
+database before switching server versions; after policies acquire the new `aliases`
+field, rollback to 0.3.0/0.3.1 requires restoring the corresponding backup.

@@ -158,7 +158,10 @@ def test_session_authenticates_policy_admin_and_legacy_rotation_revokes_it(flow)
         store.authenticate("Bearer " + value["access_token"])
 
 
-def test_cli_device_login_saves_only_verified_service_session(flow, monkeypatch, tmp_path, capsys):
+@pytest.mark.parametrize("repository", ["team/repo", "official"])
+def test_cli_device_login_saves_only_verified_service_session(
+    flow, monkeypatch, tmp_path, capsys, repository
+):
     auth, store, now, state = flow
     from pr_rerun.cli import LOGIN_PROBE, github_login
 
@@ -172,6 +175,9 @@ def test_cli_device_login_saves_only_verified_service_session(flow, monkeypatch,
 
     def remote(request):
         path = request.url.path
+        if path == "/api/repository-aliases/official":
+            store.authenticate(request.headers["Authorization"])
+            return httpx.Response(200, json={"repository": "team/repo"})
         if path == "/api/auth/config":
             return httpx.Response(200, json={"github_login": True})
         if path == "/api/auth/device/start":
@@ -186,7 +192,7 @@ def test_cli_device_login_saves_only_verified_service_session(flow, monkeypatch,
         "pr_rerun.cli.httpx.Client",
         lambda **kwargs: client_class(transport=httpx.MockTransport(remote), **kwargs),
     )
-    github_login("http://127.0.0.1:8080", False, "team/repo")
+    github_login("http://127.0.0.1:8080", False, repository)
     saved = load_login()
     assert saved is not None and saved.repository == "team/repo"
     assert store.authenticate("Bearer " + saved.access_token).github_id == 7

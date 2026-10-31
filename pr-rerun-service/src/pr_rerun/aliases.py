@@ -4,12 +4,17 @@ import argparse
 import json
 import os
 import re
+from collections.abc import Callable
 
 from pr_rerun.client_config import _directory, _open_login, _save_file
 
 FILENAME = "aliases.json"
 ALIAS = r"[A-Za-z][A-Za-z0-9_-]{0,31}"
 REPOSITORY = r"[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+"
+
+
+class UnknownAlias(ValueError):
+    pass
 
 
 def load_aliases() -> dict[str, str]:
@@ -37,30 +42,58 @@ def load_aliases() -> dict[str, str]:
             raise ValueError("Invalid repository alias file; inspect aliases.json.") from None
 
 
-def resolve_repository(value: str) -> str:
+def resolve_repository(value: str, official: Callable[[str], str] | None = None) -> str:
     if re.fullmatch(REPOSITORY, value):
         return value
     if not re.fullmatch(ALIAS, value):
         raise ValueError("Repository must be owner/repository or a configured alias")
     aliases = load_aliases()
     if value not in aliases:
-        raise ValueError("Unknown repository alias; use pr-rerun alias set NAME OWNER/REPO")
+        if official is None:
+            raise UnknownAlias(
+                "Unknown repository alias; log in to use official aliases "
+                "or configure a local alias"
+            )
+        repository = official(value)
+        if not isinstance(repository, str) or not re.fullmatch(REPOSITORY, repository):
+            raise ValueError("Invalid official alias response")
+        return repository
     return aliases[value]
 
 
-def main(arguments: list[str]) -> int:
+def main(arguments: list[str], remote: Callable | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="pr-rerun alias", description="Manage per-user repository aliases (no network access)"
+        prog="pr-rerun alias", description="Manage local aliases or authenticated official aliases"
     )
     commands = parser.add_subparsers(dest="command")
-    commands.add_parser("list", help="List aliases")
+    listing = commands.add_parser("list", help="List aliases")
     setting = commands.add_parser("set", help="Create or replace an alias")
     setting.add_argument("name")
     setting.add_argument("repository")
     remove = commands.add_parser("remove", help="Remove an alias")
     remove.add_argument("name")
+    remove.add_argument("--repo", help="Full repository name, required for official removal")
+    for command in (listing, setting, remove):
+        command.add_argument(
+            "--official",
+            action="store_true",
+            help="Use server aliases (maintainer required for changes)",
+        )
+        endpoint = command.add_mutually_exclusive_group()
+        endpoint.add_argument("--server")
+        endpoint.add_argument("--netbird-server")
     args = parser.parse_args(arguments)
     try:
+        if getattr(args, "official", False):
+            if remote is None:
+                raise ValueError("Official alias client is unavailable")
+            return remote(args)
+        if (
+            getattr(args, "server", None)
+            or getattr(args, "netbird_server", None)
+            or getattr(args, "repo", None)
+        ):
+            raise ValueError("Server and repository options require --official")
         aliases = load_aliases()
         if args.command in {None, "list"}:
             for alias, repository in sorted(aliases.items()):

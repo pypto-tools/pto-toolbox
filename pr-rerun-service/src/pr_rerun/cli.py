@@ -133,12 +133,91 @@ def request(client: httpx.Client, method: str, path: str, body: dict | None = No
         raise ValueError("Server redirects are not accepted")
     if response.status_code == 401:
         raise ValueError(AUTH_ERROR)
+    if (
+        response.status_code == 404
+        and path.startswith("/api/repository-aliases")
+        and (path == "/api/repository-aliases" or response.json().get("detail") == "Not Found")
+    ):
+        raise ValueError("Official aliases require an App-mode server version 0.3.2 or later")
     value = response.json()
     if not isinstance(value, dict):
         raise ValueError("Invalid service response")
     if response.is_error:
         raise ValueError(str(value.get("error", f"HTTP {response.status_code}")))
     return value
+
+
+def resolve_selection(client: httpx.Client, repository: str | None) -> str | None:
+    if repository is None:
+        return None
+    expanded = aliases.resolve_repository(
+        repository,
+        lambda alias: request(client, "GET", f"/api/repository-aliases/{alias}")["repository"],
+    )
+    if expanded != repository:
+        print(f"Official repository alias: {safe_text(repository)} -> {safe_text(expanded)}")
+    return expanded
+
+
+def official_alias_command(args) -> int:
+    if args.command != "list" and not re.fullmatch(aliases.ALIAS, args.name):
+        raise ValueError("Invalid alias name")
+    repository = args.repository if args.command == "set" else getattr(args, "repo", None)
+    if args.command != "list" and (
+        not repository or not re.fullmatch(aliases.REPOSITORY, repository)
+    ):
+        raise ValueError(
+            "Official alias changes require a full repository name; removal uses --repo"
+        )
+    saved = load_login()
+    server, _ = configured_endpoint(args.server, args.netbird_server, saved)
+    if not has_credentials(server, saved):
+        raise ValueError("Run pr-rerun login before using official aliases")
+    token = selected_token(server, saved, login=False)
+    try:
+        with httpx.Client(
+            base_url=server,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=60,
+            follow_redirects=False,
+            trust_env=False,
+        ) as client:
+            if args.command == "list":
+                value = request(client, "GET", "/api/repository-aliases")["aliases"]
+                if not isinstance(value, dict):
+                    raise ValueError("Invalid official alias response")
+                for alias, name in sorted(value.items()):
+                    print(f"{safe_text(alias)} -> {safe_text(name)} (official)")
+                if not value:
+                    print("No official aliases available for your account.")
+                return 0
+            path = f"/api/repositories/{repository}/policy"
+            current = request(client, "GET", path)
+            policy = current["policy"]
+            if "aliases" not in policy:
+                raise ValueError("Official aliases require server version 0.3.2 or later")
+            names = policy.get("aliases", [])
+            if args.command == "set":
+                policy["aliases"] = sorted(set(names) | {args.name})
+            else:
+                if args.name not in names:
+                    raise ValueError("Official alias is not assigned to this repository")
+                policy["aliases"] = [name for name in names if name != args.name]
+            result = request(
+                client, "POST", path, {"expected_revision": current["revision"], "policy": policy}
+            )
+            print(f"Official aliases updated for {repository} (revision {result['revision']}).")
+            return 0
+    except httpx.HTTPError:
+        raise ValueError(
+            "Service unavailable; inspect current policy before retrying an update"
+        ) from None
+
+
+def has_credentials(server: str, saved: SavedLogin | None) -> bool:
+    return bool(os.environ.get("PR_RERUN_ACCESS_TOKEN")) or (
+        saved is not None and httpx.URL(server) == httpx.URL(saved.server)
+    )
 
 
 def show_result(result: dict) -> int:
@@ -194,6 +273,7 @@ def github_login(server: str, netbird: bool, repository: str | None) -> None:
                     raise ValueError("Invalid login response")
                 client.headers["Authorization"] = f"Bearer {token}"
                 verify_login(client)
+                repository = resolve_selection(client, repository)
                 save_login(SavedLogin(server, netbird, token, repository))
                 print(f"Logged in as @{safe_text(result['login'])}.")
                 print("Login saved. You can now run: pr-rerun <PR-number>")
@@ -266,7 +346,7 @@ def run_client(
 
 def main() -> None:
     if len(sys.argv) > 1 and sys.argv[1] == "alias":
-        raise SystemExit(aliases.main(sys.argv[2:]))
+        raise SystemExit(aliases.main(sys.argv[2:], official_alias_command))
     parser = argparse.ArgumentParser(description="Preview and confirm reruns for your own PRs")
     parser.add_argument(
         "target", help="PR number, 'login', 'logout', 'status', 'policy', or 'alias'"
@@ -316,9 +396,16 @@ def main() -> None:
         ):
             repository = saved.repository
         if repository is not None:
-            expanded = aliases.resolve_repository(repository)
+            try:
+                expanded = aliases.resolve_repository(repository)
+            except aliases.UnknownAlias:
+                expanded = repository
+                if args.target != "login" and not has_credentials(server, saved):
+                    raise ValueError(
+                        "Log in to resolve official aliases, or configure a local alias"
+                    ) from None
             if expanded != repository:
-                print(f"Repository alias: {repository} -> {expanded}")
+                print(f"Local repository alias: {repository} -> {expanded}")
             repository = expanded
         logging_in = args.target == "login"
         if args.token_login and not logging_in:
@@ -336,6 +423,7 @@ def main() -> None:
             follow_redirects=False,
             trust_env=False,
         ) as client:
+            repository = resolve_selection(client, repository)
             if logging_in:
                 verify_login(client)
                 save_login(SavedLogin(server, netbird, token, repository))
