@@ -236,6 +236,10 @@ def create_app(
     def official_aliases(actor: Annotated[Principal, Depends(principal)]):
         return {"aliases": registry().policies.aliases(actor)}
 
+    @app.get("/api/repositories")
+    def repositories(actor: Annotated[Principal, Depends(principal)]):
+        return registry().policies.repositories(actor)
+
     @app.get("/api/repository-aliases/{alias}")
     def resolve_alias(alias: str, actor: Annotated[Principal, Depends(principal)]):
         return {"repository": registry().policies.resolve_alias(alias, actor)}

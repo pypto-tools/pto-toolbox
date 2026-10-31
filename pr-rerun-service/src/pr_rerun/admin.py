@@ -8,10 +8,48 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from pr_rerun.app_auth import AppAuth
+from pr_rerun.cli import safe_text
 from pr_rerun.github import GitHub
+from pr_rerun.inventory import inventory, read_enrollments
 from pr_rerun.models import ServiceError, Settings, positive_id
 from pr_rerun.policy import PolicyStore, RepositoryPolicy, repository_name
 from pr_rerun.store import Store
+
+
+def show_inventory(report: dict, *, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(report, indent=2))
+        return
+    print("GitHub App installations and service enrollment (authorization snapshot):")
+    if not report["installations"]:
+        print("No GitHub App installations found.")
+    for row in report["installations"]:
+        flags = [
+            "suspended" if row["suspended"] else "active",
+            "selection=" + str(row["selection"]),
+        ]
+        if row["selection"] != "selected":
+            flags.append("unsupported selection for reruns")
+        if not row["permissions_ok"]:
+            flags.append("missing rerun permissions")
+        print(
+            f"Installation {row['installation_id']}  {safe_text(row['account'])}  "
+            + safe_text(", ".join(flags))
+        )
+        if row["error"]:
+            print("  WARNING: " + safe_text(row["error"]))
+        if row["repositories_checked"] and not row["repositories"]:
+            print("  No repositories authorized.")
+        for repository in row["repositories"]:
+            status = repository["enrollment"]
+            if repository["service"]:
+                service = repository["service"]
+                status += ", " + ("enabled" if service["enabled"] else "disabled")
+                status += ", aliases=" + (",".join(service["aliases"]) or "-")
+            print("  " + safe_text(repository["repository"]) + "  " + safe_text(status))
+    for row in report["service_only"]:
+        print("Service-only: " + safe_text(row["repository"]) + "  " + row["github_status"])
+    print("No repository enrollment, rules, or workflow runs were changed.")
 
 
 def main() -> None:
@@ -33,6 +71,10 @@ def main() -> None:
     revoke = commands.add_parser("revoke", help="Revoke a user's token by immutable GitHub user ID")
     revoke.add_argument("github_id", type=int)
     commands.add_parser("users", help="List identities without token hashes or credentials")
+    installations = commands.add_parser(
+        "installations", help="Compare GitHub App repository access with service enrollment"
+    )
+    installations.add_argument("--json", action="store_true", help="Output structured JSON")
     administrators = commands.add_parser(
         "service-admin", help="Manage service-wide policy administrators locally"
     )
@@ -47,6 +89,21 @@ def main() -> None:
         database = os.environ.get("PR_RERUN_DATABASE")
         if not database:
             raise ValueError("PR_RERUN_DATABASE is required")
+        if args.command == "installations":
+            records = read_enrollments(Path(database))
+            settings = Settings.from_env(github_auth="app")
+            assert settings.app_id is not None and settings.app_key_file is not None
+            auth = AppAuth(settings.app_id, settings.app_key_file)
+            try:
+                report = inventory(auth, records)
+            finally:
+                auth.close()
+            show_inventory(report, as_json=args.json)
+            if not report["complete"]:
+                parser.exit(
+                    1, "Warning: inventory is incomplete; unchecked repositories are unknown.\n"
+                )
+            return
         store = Store(Path(database))
         if args.command == "users":
             print(json.dumps(store.users(), indent=2))

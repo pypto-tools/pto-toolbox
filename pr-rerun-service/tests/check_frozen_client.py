@@ -30,6 +30,8 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(200, {"github_login": True})
         elif self.headers.get("Authorization") != "Bearer " + TOKEN:
             self.reply(401, {"error": "Unauthenticated"})
+        elif self.path == "/api/repositories":
+            self.reply(200, {"scope": "visible", "github_checked": False, "repositories": []})
         elif self.path == "/api/reruns/" + REQUEST:
             self.reply(200, {"request_id": REQUEST, "state": "accepted", "runs": []})
         else:
@@ -74,6 +76,8 @@ def main():
                     "example/project",
                 ],
                 ["status", REQUEST],
+                ["repos"],
+                ["repos", "--json"],
                 ["alias", "set", "demo", "example/project"],
                 ["alias", "list"],
                 ["logout"],

@@ -75,7 +75,9 @@ class AppAuth:
             os.close(descriptor)
         return message + "." + encode(signed)
 
-    def _json(self, method: str, path: str, token: str, payload: dict | None = None) -> dict:
+    def _value(
+        self, method: str, path: str, token: str, payload: dict | None = None
+    ) -> dict | list:
         # Only internal, fixed paths below call this method; no client URL is accepted.
         try:
             with self.client.stream(
@@ -93,11 +95,109 @@ class AppAuth:
                         f"GitHub App authorization failed (HTTP {response.status_code})."
                     )
                 value = json.loads(GitHub._read_bounded(response))
-                if not isinstance(value, dict):
+                if not isinstance(value, (dict, list)):
                     raise ValueError
                 return value
         except (httpx.HTTPError, ValueError):
             raise UpstreamError("GitHub App authorization could not be verified.") from None
+
+    def _json(self, method: str, path: str, token: str, payload: dict | None = None) -> dict:
+        value = self._value(method, path, token, payload)
+        if not isinstance(value, dict):
+            raise UpstreamError("Invalid GitHub App response.")
+        return value
+
+    def installations(self) -> list[dict]:
+        """Inventory only: fresh metadata-only tokens, never rerun credentials."""
+        installations = []
+        seen = set()
+        for page in range(1, 101):
+            rows = self._value("GET", f"/app/installations?per_page=100&page={page}", self.jwt())
+            if not isinstance(rows, list):
+                raise UpstreamError("Invalid GitHub installation listing.")
+            try:
+                for row in rows:
+                    identity = positive_id(row["id"])
+                    if row.get("app_id") != self.app_id or identity in seen:
+                        raise ValueError
+                    seen.add(identity)
+                    installations.append(
+                        {
+                            "installation_id": identity,
+                            "account": str(row["account"]["login"]),
+                            "selection": row["repository_selection"],
+                            "suspended": row.get("suspended_at") is not None,
+                            "permissions_ok": all(
+                                row.get("permissions", {}).get(key)
+                                in ({"write"} if mode == "write" else {"read", "write"})
+                                for key, mode in PERMISSIONS.items()
+                            ),
+                            "repositories": [],
+                            "repositories_checked": False,
+                            "error": None,
+                        }
+                    )
+            except (KeyError, TypeError, ValueError, AttributeError):
+                raise UpstreamError("Invalid GitHub installation listing.") from None
+            if len(rows) < 100:
+                break
+        else:
+            raise UpstreamError("GitHub installation inventory exceeded the pagination limit.")
+        for installation in installations:
+            if installation["suspended"]:
+                installation["error"] = (
+                    "Installation is suspended; repository access was not checked."
+                )
+                continue
+            try:
+                identity = installation["installation_id"]
+                value = self._json(
+                    "POST",
+                    f"/app/installations/{identity}/access_tokens",
+                    self.jwt(),
+                    {"permissions": {"metadata": "read"}},
+                )
+                token = value.get("token")
+                if not isinstance(token, str) or not token:
+                    raise ValueError
+                permissions = value.get("permissions", {})
+                if any(mode not in {"read", "none"} for mode in permissions.values()):
+                    raise ValueError
+                repositories = []
+                repo_ids = set()
+                for page in range(1, 101):
+                    value = self._json(
+                        "GET", f"/installation/repositories?per_page=100&page={page}", token
+                    )
+                    rows = value["repositories"]
+                    if not isinstance(rows, list):
+                        raise ValueError
+                    for row in rows:
+                        repo_id = positive_id(row["id"])
+                        if repo_id in repo_ids:
+                            raise ValueError
+                        repo_ids.add(repo_id)
+                        repositories.append(
+                            {
+                                "repository": repository_name(row["full_name"]),
+                                "repository_id": repo_id,
+                            }
+                        )
+                    if len(rows) < 100:
+                        break
+                else:
+                    raise ValueError
+                installation["repositories"] = sorted(
+                    repositories, key=lambda row: row["repository"]
+                )
+                installation["repositories_checked"] = True
+            except (ServiceError, KeyError, TypeError, ValueError, AttributeError):
+                # Partial failures must be explicit and never expose token response bodies.
+                installation["error"] = (
+                    "Repository access could not be checked; "
+                    "retry after inspecting installation permissions and connectivity."
+                )
+        return sorted(installations, key=lambda row: row["installation_id"])
 
     def credentials(
         self, name: str, repository_id: int | None = None, installation_id: int | None = None

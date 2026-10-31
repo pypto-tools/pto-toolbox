@@ -183,6 +183,8 @@ def request(client: httpx.Client, method: str, path: str, body: dict | None = No
         raise ValueError("Server redirects are not accepted")
     if response.status_code == 401:
         raise ValueError(AUTH_ERROR)
+    if response.status_code == 404 and path == "/api/repositories":
+        raise ValueError("Repository listing requires an App-mode server version 0.4.1 or later")
     if (
         response.status_code == 404
         and path.startswith("/api/repository-aliases")
@@ -207,6 +209,51 @@ def resolve_selection(client: httpx.Client, repository: str | None) -> str | Non
     if expanded != repository:
         print(f"Official repository alias: {safe_text(repository)} -> {safe_text(expanded)}")
     return expanded
+
+
+def list_repositories(args) -> None:
+    if args.repo is not None or args.request_id is not None:
+        raise ValueError("Use pr-rerun repos [--json] without a PR or repository selector")
+    saved = load_login()
+    server, _ = configured_endpoint(args.server, args.netbird_server, saved)
+    if not has_credentials(server, saved):
+        raise ValueError("Run pr-rerun login before listing repositories")
+    with httpx.Client(
+        base_url=server,
+        headers={"Authorization": "Bearer " + selected_token(server, saved, login=False)},
+        timeout=30,
+        trust_env=False,
+        follow_redirects=False,
+    ) as client:
+        value = request(client, "GET", "/api/repositories")
+    rows = value.get("repositories")
+    if value.get("scope") not in {"all", "visible"} or not isinstance(rows, list):
+        raise ValueError("Invalid repository listing response")
+    if args.json:
+        print(json.dumps(value, indent=2))
+        return
+    print(
+        "Service repositories: " + ("all" if value["scope"] == "all" else "visible to your account")
+    )
+    print("GitHub App authorization is not checked by this listing.")
+    if not rows:
+        print("No repositories available for your account.")
+        return
+    print("REPOSITORY  STATUS  ALIASES  ROLE  REVISION")
+    for row in rows:
+        try:
+            if not isinstance(row["aliases"], list) or type(row["enabled"]) is not bool:
+                raise ValueError
+            values = [
+                row["repository"],
+                "enabled" if row["enabled"] else "disabled",
+                ",".join(row["aliases"]) or "-",
+                row["role"],
+                row["revision"],
+            ]
+        except (KeyError, TypeError, ValueError):
+            raise ValueError("Invalid repository listing response") from None
+        print("  ".join(safe_text(value) for value in values))
 
 
 def official_alias_command(args) -> int:
@@ -412,7 +459,7 @@ def main() -> None:
 
     parser.add_argument("--version", action="version", version=f"pr-rerun {VERSION}")
     parser.add_argument(
-        "target", help="PR number, 'login', 'logout', 'status', 'policy', or 'alias'"
+        "target", help="PR number, 'login', 'logout', 'status', 'policy', 'alias', or 'repos'"
     )
     parser.add_argument("request_id", nargs="?")
     parser.add_argument("--verbose", action="store_true", help="Show excluded runs in the preview")
@@ -431,6 +478,7 @@ def main() -> None:
         "--policy-file", type=Path, help="For policy: JSON with expected_revision and policy"
     )
     parser.add_argument("--history", action="store_true", help="For policy: show policy history")
+    parser.add_argument("--json", action="store_true", help="For repos: output structured JSON")
     parser.add_argument(
         "--token-login",
         action="store_true",
@@ -450,6 +498,13 @@ def main() -> None:
             return
         if args.target != "policy" and (args.policy_file is not None or args.history):
             raise ValueError("Policy options require the policy command")
+        if args.json and args.target != "repos":
+            raise ValueError("--json requires the repos command")
+        if args.token_login and args.target != "login":
+            raise ValueError("--token-login requires the login command")
+        if args.target == "repos":
+            list_repositories(args)
+            return
         saved = load_login()
         server, netbird = configured_endpoint(args.server, args.netbird_server, saved)
         repository = args.repo or os.environ.get("PR_RERUN_REPOSITORY")

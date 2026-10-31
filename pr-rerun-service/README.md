@@ -94,6 +94,35 @@ Login saves the origin and token in `~/.config/pr-rerun/client.json` (or under
 without creating a rerun. A saved token is only reused for its original server.
 One OS account stores one login; contributors sharing an OS account share that login.
 
+
+## Repository inventory (0.4.1)
+
+```bash
+pr-rerun repos
+pr-rerun repos --json
+```
+
+Lists service enrollment, including repositories without aliases. Service admins
+see all repositories, including disabled ones; repository maintainers see their
+disabled repositories too. Other users see only enabled repositories they may
+access. This does not check current GitHub authorization or bypass PR ownership.
+Requires an App-mode server upgraded to 0.4.1; a client-only update is insufficient.
+
+On the service host, with the running service's App/database environment loaded:
+
+```bash
+pr-rerun-admin installations
+pr-rerun-admin installations --json
+```
+
+Compares live App installations/repositories with local enrollment: `enrolled`,
+`not_enrolled`, `identity_changed`, and service-only entries whose access is
+missing or unknown. Suspensions and incomplete queries are explicit; incomplete
+inventory exits 1, configuration/API errors exit 2. JSON includes `complete`.
+The query opens the existing database read-only and creates only temporary
+metadata-read installation tokens; it never enrolls repositories or reruns jobs.
+The admin command stays on the service host and is not in the standalone client.
+
 ## Security and publishing
 
 Credentials, databases, logs, local deployment units, virtual environments,

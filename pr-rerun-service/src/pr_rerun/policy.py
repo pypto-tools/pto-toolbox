@@ -122,6 +122,41 @@ class PolicyStore:
             result[row["alias"]] = row["repository"]
         return result
 
+    def repositories(self, principal: Principal) -> dict:
+        """List local enrollment only; never imply live GitHub authorization."""
+        service_admin = self.store.is_service_admin(principal.github_id)
+        result = []
+        with self.store.connection() as db:
+            rows = db.execute(
+                "SELECT name, revision, policy FROM repositories ORDER BY name"
+            ).fetchall()
+        for row in rows:
+            policy = RepositoryPolicy.model_validate_json(row["policy"])
+            maintainer = principal.github_id in policy.maintainers
+            if not service_admin and not maintainer:
+                try:
+                    self.authorize({"policy": policy}, principal)
+                except ServiceError:
+                    continue
+            result.append(
+                {
+                    "repository": row["name"],
+                    "aliases": policy.aliases,
+                    "enabled": policy.enabled,
+                    "revision": row["revision"],
+                    "role": "service_admin"
+                    if service_admin
+                    else "maintainer"
+                    if maintainer
+                    else "user",
+                }
+            )
+        return {
+            "scope": "all" if service_admin else "visible",
+            "github_checked": False,
+            "repositories": result,
+        }
+
     def resolve_alias(self, alias: str, principal: Principal) -> str:
         # Both listing and resolution hide inaccessible or disabled repositories.
         value = self.aliases(principal).get(alias)
