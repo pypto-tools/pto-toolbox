@@ -248,3 +248,32 @@ def test_no_automatic_downgrade(tmp_path):
     with pytest.raises(installer.InstallError, match="downgrade"):
         installer.install(arguments(tmp_path, *bundle(tmp_path)))
     assert (tmp_path / "installation/current").resolve().name == "0.4.1"
+
+
+def test_frozen_downloader_loads_bundled_ca_without_requiring_system_paths(tmp_path, monkeypatch):
+    import certifi
+
+    loaded = []
+
+    class Context:
+        def load_verify_locations(self, path):
+            loaded.append(path)
+
+    class Opener:
+        def open(self, request, timeout):
+            return io.BytesIO(b"downloaded through verified TLS context")
+
+    context = Context()
+    monkeypatch.setattr(installer.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(installer.ssl, "create_default_context", lambda: context)
+
+    def build_opener(*handlers):
+        https = next(h for h in handlers if isinstance(h, installer.urllib.request.HTTPSHandler))
+        assert https._context is context
+        return Opener()
+
+    monkeypatch.setattr(installer.urllib.request, "build_opener", build_opener)
+    target = tmp_path / "download"
+    installer.download("https://github.com/example", target)
+    assert loaded == [certifi.where()]
+    assert target.read_bytes() == b"downloaded through verified TLS context"

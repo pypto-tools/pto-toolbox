@@ -13,6 +13,7 @@ import os
 import platform
 import re
 import shutil
+import ssl
 import stat
 import subprocess
 import sys
@@ -64,7 +65,14 @@ class HTTPSRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def download(url, destination, proxy=None, limit=MAX_BYTES):
-    handlers = [HTTPSRedirect()]
+    context = ssl.create_default_context()
+    if getattr(sys, "frozen", False):
+        # Portable Python cannot rely on certificate paths from the build image.
+        # certifi is already bundled for httpx; the bootstrap stays stdlib-only.
+        import certifi
+
+        context.load_verify_locations(certifi.where())
+    handlers = [HTTPSRedirect(), urllib.request.HTTPSHandler(context=context)]
     if proxy:
         handlers.append(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
     opener = urllib.request.build_opener(*handlers)
