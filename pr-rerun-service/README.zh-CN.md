@@ -119,3 +119,22 @@ python -m build
 
 测试模拟 GitHub，不执行真实重跑。Linux socket 测试需要具备将 socket 绑定到网卡
 （包括回环网卡）的权限。
+
+## 仓库别名（客户端 0.3.1）
+
+在客户端配置一次即可，无需改服务端或重新登录：
+
+```bash
+pr-rerun alias set pypto hw-native-sys/pypto
+pr-rerun alias set toolbox pypto-tools/pto-toolbox
+pr-rerun 123 --repo pypto
+pr-rerun 456 --repo toolbox
+pr-rerun alias list
+pr-rerun alias remove toolbox
+```
+
+别名区分大小写，按 Linux 用户保存在 `~/.config/pr-rerun/aliases.json`，也支持
+`XDG_CONFIG_HOME`。只保存完整仓库名，不包含令牌，登录或退出不会删除别名。
+`--repo`、`PR_RERUN_REPOSITORY`、登录和规则管理命令都支持别名。
+登录保存的是展开后的完整仓库名，后来改别名不会悄悄改变默认仓库。
+预览和确认仍显示完整仓库名，服务端授权及本人 PR 校验保持不变。

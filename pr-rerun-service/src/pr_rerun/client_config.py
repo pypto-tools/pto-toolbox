@@ -68,10 +68,10 @@ def _directory(*, create: bool = False) -> Iterator[int | None]:
         raise ValueError("Cannot access the private pr-rerun login directory") from error
 
 
-def _open_login(directory: int) -> int | None:
+def _open_login(directory: int, filename: str = FILENAME) -> int | None:
     try:
         descriptor = os.open(
-            FILENAME, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory
+            filename, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory
         )
     except FileNotFoundError:
         return None
@@ -135,9 +135,14 @@ def save_login(login: SavedLogin) -> None:
             **({"repository": login.repository} if login.repository is not None else {}),
         }
     )
+    _save_file(FILENAME, payload)
+
+
+def _save_file(filename: str, payload: str) -> None:
+    """Atomically save an internally selected config filename with private permissions."""
     with _directory(create=True) as directory:
         assert directory is not None
-        existing = _open_login(directory)
+        existing = _open_login(directory, filename)
         if existing is not None:
             os.close(existing)
         temporary = f".client-{secrets.token_hex(16)}.tmp"
@@ -153,7 +158,7 @@ def save_login(login: SavedLogin) -> None:
                 target.write(payload + "\n")
                 target.flush()
                 os.fsync(target.fileno())
-            os.replace(temporary, FILENAME, src_dir_fd=directory, dst_dir_fd=directory)
+            os.replace(temporary, filename, src_dir_fd=directory, dst_dir_fd=directory)
             os.fsync(directory)
         finally:
             try:

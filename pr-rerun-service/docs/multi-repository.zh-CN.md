@@ -210,3 +210,22 @@ sudo /opt/pr-rerun-client/bin/python -I -m pip --isolated check
 ```
 
 用户仍用普通账号登录，不加 sudo。首次安装脚本会拒绝覆盖已有共享安装，不用于升级。
+
+## 仓库别名（客户端 0.3.1）
+
+在客户端配置一次即可，无需改服务端或重新登录：
+
+```bash
+pr-rerun alias set pypto hw-native-sys/pypto
+pr-rerun alias set toolbox pypto-tools/pto-toolbox
+pr-rerun 123 --repo pypto
+pr-rerun 456 --repo toolbox
+pr-rerun alias list
+pr-rerun alias remove toolbox
+```
+
+别名区分大小写，按 Linux 用户保存在 `~/.config/pr-rerun/aliases.json`，也支持
+`XDG_CONFIG_HOME`。只保存完整仓库名，不包含令牌，登录或退出不会删除别名。
+`--repo`、`PR_RERUN_REPOSITORY`、登录和规则管理命令都支持别名。
+登录保存的是展开后的完整仓库名，后来改别名不会悄悄改变默认仓库。
+预览和确认仍显示完整仓库名，服务端授权及本人 PR 校验保持不变。

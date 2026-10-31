@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from pr_rerun import aliases
 from pr_rerun.client_config import (
     TOKEN_PATTERN,
     SavedLogin,
@@ -264,8 +265,12 @@ def run_client(
 
 
 def main() -> None:
+    if len(sys.argv) > 1 and sys.argv[1] == "alias":
+        raise SystemExit(aliases.main(sys.argv[2:]))
     parser = argparse.ArgumentParser(description="Preview and confirm reruns for your own PRs")
-    parser.add_argument("target", help="PR number, 'login', 'logout', or 'status'")
+    parser.add_argument(
+        "target", help="PR number, 'login', 'logout', 'status', 'policy', or 'alias'"
+    )
     parser.add_argument("request_id", nargs="?")
     endpoint = parser.add_mutually_exclusive_group()
     endpoint.add_argument(
@@ -275,7 +280,9 @@ def main() -> None:
         "--netbird-server",
         help="Server at a verified NetBird IP; allows HTTP (or set PR_RERUN_NETBIRD_URL)",
     )
-    parser.add_argument("--repo", help="Target repository; saved as default during login")
+    parser.add_argument(
+        "--repo", help="Full repository name or local alias; saved as default during login"
+    )
     parser.add_argument(
         "--policy-file", type=Path, help="For policy: JSON with expected_revision and policy"
     )
@@ -297,8 +304,6 @@ def main() -> None:
             if os.environ.get("PR_RERUN_ACCESS_TOKEN"):
                 print("PR_RERUN_ACCESS_TOKEN is still set; unset it to stop using that token.")
             return
-        if args.repo is not None and not re.fullmatch(r"[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+", args.repo):
-            raise ValueError("--repo must be owner/repository")
         if args.target != "policy" and (args.policy_file is not None or args.history):
             raise ValueError("Policy options require the policy command")
         saved = load_login()
@@ -310,10 +315,11 @@ def main() -> None:
             and httpx.URL(server) == httpx.URL(saved.server)
         ):
             repository = saved.repository
-        if repository is not None and not re.fullmatch(
-            r"[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+", repository
-        ):
-            raise ValueError("Repository must be owner/repository")
+        if repository is not None:
+            expanded = aliases.resolve_repository(repository)
+            if expanded != repository:
+                print(f"Repository alias: {repository} -> {expanded}")
+            repository = expanded
         logging_in = args.target == "login"
         if args.token_login and not logging_in:
             raise ValueError("--token-login requires the login command")

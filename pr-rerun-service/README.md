@@ -128,3 +128,23 @@ python -m build
 
 Tests simulate GitHub and never trigger real reruns. Linux socket tests require
 permission to bind sockets to interfaces, including loopback.
+
+## Repository aliases (client 0.3.1)
+
+Configure shorthand locally; no server changes or new login are required:
+
+```bash
+pr-rerun alias set pypto hw-native-sys/pypto
+pr-rerun alias set toolbox pypto-tools/pto-toolbox
+pr-rerun 123 --repo pypto
+pr-rerun 456 --repo toolbox
+pr-rerun alias list
+pr-rerun alias remove toolbox
+```
+
+Aliases are case-sensitive and stored per OS user in `~/.config/pr-rerun/aliases.json`
+(or under `XDG_CONFIG_HOME`). They contain only full repository names, never tokens,
+and survive login/logout. `--repo`, `PR_RERUN_REPOSITORY`, login and policy commands
+accept aliases. Login saves the expanded repository name, so remapping an alias
+later does not silently change the saved default. Previews and confirmation still
+show the full repository name. Server-side grants and author checks remain unchanged.
