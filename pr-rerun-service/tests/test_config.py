@@ -66,3 +66,37 @@ def test_environment_credentials_are_explicit(monkeypatch):
     monkeypatch.setenv("GH_TOKEN", "do-not-use-ambient-credentials")
     with pytest.raises(ValueError, match="Configure"):
         Settings.from_env()
+
+
+def test_app_configuration_never_loads_a_personal_token(monkeypatch, tmp_path):
+    monkeypatch.delenv("PR_RERUN_CONFIG", raising=False)
+    monkeypatch.setenv("PR_RERUN_DATABASE", str(tmp_path / "state.sqlite"))
+    monkeypatch.setenv("PR_RERUN_APP_ID", "123")
+    monkeypatch.setenv("PR_RERUN_APP_PRIVATE_KEY_FILE", str(tmp_path / "app.pem"))
+    monkeypatch.setattr(
+        "pr_rerun.models.github_credential",
+        lambda mode: pytest.fail("Personal credential must not be loaded"),
+    )
+    settings = Settings.from_env(github_auth="app")
+    assert settings.app_id == 123
+    assert settings.app_key_file == tmp_path / "app.pem"
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("maintainers", []),
+        ("users", [True]),
+        ("users", [7, 7]),
+        ("base_branches", []),
+        ("max_requests_per_user_per_day", 0),
+        ("enabled", "true"),
+    ],
+)
+def test_invalid_repository_policy_is_rejected(field, value):
+    from pr_rerun.policy import RepositoryPolicy
+
+    fields = dict(maintainers=[7], workflows=[WorkflowRule(path=".github/workflows/ci.yml")])
+    fields[field] = value
+    with pytest.raises(ValidationError):
+        RepositoryPolicy.model_validate(fields)

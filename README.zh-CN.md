@@ -28,7 +28,7 @@
 | ---- | ---- |
 | [`deploy-git-mirror`](deploy-git-mirror/README.zh-CN.md) | 让 CI 对热点仓库的 clone 走本地。在 runner 上放一份 bare 镜像，用 `url.insteadOf` 把该仓的 URL 透明重定向过去，网络克隆变成同盘硬链接克隆（~20ms）。定时任务负责保持镜像新鲜。 |
 | [`netbird-preflight`](netbird-preflight/README.zh-CN.md) | 在动手安装之前，检查本机能否接入自建 NetBird 网络。纯只读：检查 CPU 架构、DNS、时钟偏差、CA 信任链、TCP/UDP 连通性、WireGuard 能力，以及与现有 VPN 的冲突。 |
-| [`pr-rerun-service`](pr-rerun-service/README.zh-CN.md) | 贡献者通过 NetBird 预览并确认重跑本人的 PR。普通失败只重跑失败任务，配置的 Codex Review 工作流重跑全部任务。包含个人持久化登录、全机共享客户端安装和 systemd 部署。 |
+| [`pr-rerun-service`](pr-rerun-service/README.zh-CN.md) | 贡献者通过 NetBird 预览并确认重跑本人的 PR。普通失败只重跑失败任务，配置的 Codex Review 工作流重跑全部任务。支持 GitHub App 认证、每仓库独立规则、持久化登录、全机共享客户端和 systemd 部署。 |
 
 ## 取用某个工具
 
@@ -51,7 +51,7 @@ PR 重跑服务请先看[安装和使用说明](pr-rerun-service/README.zh-CN.md
 `100.64.0.10` 是示例地址，需要换成实际服务端的 NetBird IP：
 
 ```bash
-pr-rerun login --netbird-server http://100.64.0.10:8080
+pr-rerun login --token-login --netbird-server http://100.64.0.10:8080
 pr-rerun 123
 ```
 

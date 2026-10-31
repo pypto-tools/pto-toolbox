@@ -32,7 +32,7 @@ def test_login_persists_across_processes_using_existing_api(app, remote, tmp_pat
             env["PYTHONPATH"] = str(Path(__file__).parents[1] / "src")
             command = [sys.executable, "-m", "pr_rerun.cli"]
             login = subprocess.run(
-                [*command, "login", "--server", origin],
+                [*command, "login", "--token-login", "--server", origin],
                 env={**env, "PR_RERUN_ACCESS_TOKEN": token},
                 stdin=subprocess.DEVNULL,
                 capture_output=True,

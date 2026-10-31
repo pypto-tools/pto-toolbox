@@ -58,6 +58,15 @@ class Settings(StrictModel):
             path=".github/workflows/codex-review.yml", mode="all", identity="codex_manifest"
         ),
     )
+    app_id: int | None = Field(default=None, gt=0)
+    app_client_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_.-]{1,100}$")
+    app_key_file: Path | None = Field(default=None, repr=False)
+    policy_revision: int = Field(default=0, ge=0)
+    repository_id: int | None = Field(default=None, gt=0)
+    allow_drafts: bool = True
+    base_branches: tuple[str, ...] = ()
+    daily_limit: int | None = None
+    active_limit: int | None = None
     preview_ttl: int = Field(default=300, ge=30, le=900)
     preview_interval: int = Field(default=5, ge=0)
     confirm_interval: int = Field(default=60, ge=0)
@@ -85,6 +94,21 @@ class Settings(StrictModel):
         database = os.environ.get("PR_RERUN_DATABASE")
         if not database:
             raise ValueError("Configure PR_RERUN_DATABASE")
+        mode = github_auth or os.environ.get("PR_RERUN_GITHUB_AUTH", "token")
+        if mode == "app":
+            if data:
+                raise ValueError("App mode uses repository policies; unset PR_RERUN_CONFIG")
+            app_id = int(os.environ.get("PR_RERUN_APP_ID", "0"))
+            key_file = os.environ.get("PR_RERUN_APP_PRIVATE_KEY_FILE")
+            if app_id <= 0 or not key_file:
+                raise ValueError("Set PR_RERUN_APP_ID and PR_RERUN_APP_PRIVATE_KEY_FILE")
+            return cls(
+                database=Path(database),
+                github_token=SecretStr("installation-managed"),
+                app_id=app_id,
+                app_client_id=os.environ.get("PR_RERUN_APP_CLIENT_ID") or None,
+                app_key_file=Path(key_file),
+            )
         token = github_credential(github_auth)
         return cls(database=Path(database), github_token=SecretStr(token), **data)
 
@@ -123,6 +147,7 @@ class RunPlan(StrictModel):
 
 
 class Plan(StrictModel):
+    policy_revision: int = 0
     repository: str
     pr: PullRequest
     runs: tuple[RunPlan, ...]

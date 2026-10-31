@@ -41,6 +41,10 @@ class Store:
                     ticket_hash TEXT UNIQUE NOT NULL, plan TEXT NOT NULL,
                     state TEXT NOT NULL, error TEXT
                 );
+                CREATE TABLE IF NOT EXISTS sessions (
+                    token_hash TEXT PRIMARY KEY, github_id INTEGER NOT NULL,
+                    expires REAL NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS rate_limits (
                     key TEXT PRIMARY KEY, at REAL NOT NULL
                 );
@@ -48,6 +52,11 @@ class Store:
                     request_id TEXT NOT NULL, run_id INTEGER NOT NULL, attempt INTEGER NOT NULL,
                     state TEXT NOT NULL, message TEXT, updated REAL NOT NULL,
                     PRIMARY KEY (request_id, run_id)
+                );
+                CREATE TABLE IF NOT EXISTS submission_limits (
+                    repository_id INTEGER NOT NULL, actor INTEGER NOT NULL,
+                    day INTEGER NOT NULL, count INTEGER NOT NULL,
+                    PRIMARY KEY(repository_id, actor, day)
                 );
                 CREATE TABLE IF NOT EXISTS claims (
                     repository_id INTEGER NOT NULL, run_id INTEGER NOT NULL,
@@ -70,6 +79,7 @@ class Store:
         positive_id(github_id)
         token = f"prr_{secrets.token_urlsafe(32)}"
         with self.connection() as db:
+            db.execute("DELETE FROM sessions WHERE github_id=?", (github_id,))
             db.execute(
                 "INSERT INTO users VALUES (?, ?, ?, 1) ON CONFLICT(github_id) DO UPDATE SET "
                 "login=excluded.login, token_hash=excluded.token_hash, enabled=1",
@@ -82,6 +92,38 @@ class Store:
             return bool(
                 db.execute("UPDATE users SET enabled=0 WHERE github_id=?", (github_id,)).rowcount
             )
+
+    def login_session(self, github_id: int, login: str) -> str:
+        """Create a per-device session only after GitHub has verified the identity."""
+        positive_id(github_id)
+        token = f"prr_{secrets.token_urlsafe(32)}"
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT enabled FROM users WHERE github_id=?", (github_id,)).fetchone()
+            if row is not None and not row["enabled"]:
+                raise ServiceError(403, "Service access has been revoked by an administrator.")
+            db.execute(
+                "INSERT INTO users VALUES (?, ?, ?, 1) "
+                "ON CONFLICT(github_id) DO UPDATE SET login=excluded.login",
+                (github_id, login, digest(secrets.token_urlsafe(32))),
+            )
+            db.execute("DELETE FROM sessions WHERE expires<=?", (self.clock(),))
+            db.execute(
+                "INSERT INTO sessions VALUES (?, ?, ?)",
+                (digest(token), github_id, self.clock() + 90 * 86400),
+            )
+        return token
+
+    def logout_session(self, token_hash: str) -> None:
+        with self.connection() as db:
+            db.execute("DELETE FROM sessions WHERE token_hash=?", (token_hash,))
+
+    def authenticated_row(self, db, token_hash):
+        return db.execute(
+            "SELECT github_id, login FROM users WHERE enabled=1 AND (token_hash=? OR github_id IN "
+            "(SELECT github_id FROM sessions WHERE token_hash=? AND expires>?))",
+            (token_hash, token_hash, self.clock()),
+        ).fetchone()
 
     def users(self) -> list[dict]:
         with self.connection() as db:
@@ -98,12 +140,10 @@ class Store:
 
     def authenticate_hash(self, token_hash: str) -> Principal:
         with self.connection() as db:
-            row = db.execute(
-                "SELECT * FROM users WHERE token_hash=? AND enabled=1", (token_hash,)
-            ).fetchone()
+            row = self.authenticated_row(db, token_hash)
         if row is None:
             raise ServiceError(401, "Service access token is invalid or revoked.")
-        return Principal(row["github_id"], row["login"], row["token_hash"])
+        return Principal(row["github_id"], row["login"], token_hash)
 
     def rate_limit(self, key: str, interval: int) -> None:
         with self.connection() as db:
@@ -119,8 +159,9 @@ class Store:
         with self.connection() as db:
             db.execute("BEGIN IMMEDIATE")
             db.execute(
-                "UPDATE requests SET state='superseded' WHERE actor=? AND state='preview'",
-                (principal.github_id,),
+                "UPDATE requests SET state='superseded' WHERE actor=? AND state='preview' "
+                "AND json_extract(plan, '$.pr.repository_id')=?",
+                (principal.github_id, plan.pr.repository_id),
             )
             db.execute(
                 "INSERT INTO requests VALUES (?, ?, ?, ?, ?, ?, ?, 'preview', NULL)",
@@ -164,11 +205,50 @@ class Store:
             db.execute("UPDATE requests SET state='validating' WHERE id=?", (row["id"],))
             return row["id"], plan, True
 
-    def reserve(self, request_id: str, plan: Plan) -> None:
+    def reserve(
+        self,
+        request_id: str,
+        plan: Plan,
+        *,
+        daily_limit: int | None = None,
+        active_limit: int | None = None,
+    ) -> None:
         """Reserve every run before the first POST; roll back the entire set on conflict."""
         try:
             with self.connection() as db:
                 db.execute("BEGIN IMMEDIATE")
+                actor = db.execute(
+                    "SELECT actor FROM requests WHERE id=?", (request_id,)
+                ).fetchone()["actor"]
+                if active_limit is not None:
+                    active = db.execute(
+                        "SELECT COUNT(*) AS n FROM requests r WHERE r.id != ? "
+                        "AND json_extract(r.plan, '$.pr.repository_id')=? "
+                        "AND json_extract(r.plan, '$.pr.number')=? "
+                        "AND (r.state IN ('validating', 'submitting') OR EXISTS "
+                        "(SELECT 1 FROM items i WHERE i.request_id=r.id "
+                        "AND i.state IN ('unknown','submitting')))",
+                        (request_id, plan.pr.repository_id, plan.pr.number),
+                    ).fetchone()["n"]
+                    if active >= active_limit:
+                        raise ServiceError(
+                            429, "This PR has another active or uncertain submission."
+                        )
+                if daily_limit is not None:
+                    day = int(self.clock() // 86400)
+                    key = (plan.pr.repository_id, actor, day)
+                    row = db.execute(
+                        "SELECT count FROM submission_limits "
+                        "WHERE repository_id=? AND actor=? AND day=?",
+                        key,
+                    ).fetchone()
+                    if row is not None and row["count"] >= daily_limit:
+                        raise ServiceError(429, "Repository daily submission limit reached.")
+                    db.execute(
+                        "INSERT INTO submission_limits VALUES (?, ?, ?, 1) "
+                        "ON CONFLICT(repository_id,actor,day) DO UPDATE SET count=count+1",
+                        key,
+                    )
                 for run in plan.runs:
                     db.execute(
                         "INSERT INTO claims VALUES (?, ?, ?, ?)",
@@ -238,6 +318,24 @@ class Store:
                 for run in plan.runs
             ],
         }
+
+    def request_plan(
+        self, principal: Principal, *, ticket: str | None = None, request_id: str | None = None
+    ) -> Plan:
+        with self.connection() as db:
+            if ticket is not None:
+                row = db.execute(
+                    "SELECT plan FROM requests WHERE ticket_hash=? AND actor=? AND token_hash=?",
+                    (digest(ticket), principal.github_id, principal.token_hash),
+                ).fetchone()
+            else:
+                row = db.execute(
+                    "SELECT plan FROM requests WHERE id=? AND actor=? AND token_hash=?",
+                    (request_id, principal.github_id, principal.token_hash),
+                ).fetchone()
+        if row is None:
+            raise ServiceError(404, "Request not found.")
+        return Plan.model_validate_json(row["plan"])
 
     def pending_items(self, request_id: str) -> list[dict]:
         with self.connection() as db:

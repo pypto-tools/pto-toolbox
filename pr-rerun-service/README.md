@@ -1,10 +1,19 @@
 # PR Rerun Service
 
+App deployments support GitHub device login without manually distributed tokens.
+See [GitHub login and repository policies](docs/multi-repository.md).
+
 An independent GitHub Actions rerun service for PyPTO contributors. An
 administrator runs one server; contributors log in once and use `pr-rerun 123`
 to inspect and confirm reruns for **their own open PRs**.
 
 English | [中文](README.zh-CN.md) | [Full operator guide](docs/README.md)
+
+Version **0.3.0** adds GitHub App authentication and independently managed repository
+policies: user grants, workflow rules, PR restrictions, quotas and audited revisions.
+See the [App and repository policy guide](docs/multi-repository.md) for registration,
+bootstrap, maintainer commands and migration. Legacy `gh`/token deployments remain
+supported. Multi-repository use requires an App installation and the 0.3.0 client.
 
 ## Behavior
 
@@ -81,7 +90,7 @@ Use your own normal OS account, **without sudo**. The address below is an exampl
 replace it with the service host's NetBird IP supplied by the administrator.
 
 ```bash
-pr-rerun login --netbird-server http://100.64.0.10:8080
+pr-rerun login --token-login --netbird-server http://100.64.0.10:8080
 # Enter your personal service token at the hidden prompt.
 
 # Subsequent invocations, including in new terminals:

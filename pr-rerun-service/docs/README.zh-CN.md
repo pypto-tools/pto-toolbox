@@ -11,6 +11,9 @@ GitHub Token 发起重跑。用户只拿到独立的服务访问令牌。
 仍不重跑。每次重跑前会再次核对失败任务。升级后需要重启服务端；原有客户端登录和
 服务令牌继续有效，客户端无需升级。`0.2.2` 引入的普通 fork 运行归属补充校验保留。
 
+0.3.0 的 App 认证与每仓库规则管理请参阅[多仓库指南](multi-repository.zh-CN.md)。
+下文安装步骤适用于兼容的单仓库 `gh`/Token 模式。
+
 ## 使用流程
 
 1. 用户输入 PR 编号，后台核对访问令牌绑定的 GitHub 用户 ID 与 PR 作者 ID。
@@ -197,7 +200,7 @@ sudo bash deploy/install-shared-client.sh
 安装只需管理员做一次，随后每位用户用**自己的普通系统账号，不加 sudo**执行：
 
 ```bash
-pr-rerun login --netbird-server http://100.64.0.10:8080
+pr-rerun login --token-login --netbird-server http://100.64.0.10:8080
 pr-rerun 123
 ```
 
@@ -212,7 +215,7 @@ pr-rerun 123
 用户在 Linux/macOS 上安装本项目后，首次登录一次：
 
 ```bash
-pr-rerun login --server https://rerun.example.com
+pr-rerun login --token-login --server https://rerun.example.com
 # 按提示输入管理员给自己的服务访问令牌。
 
 # 以后包括新开终端，直接指定 PR：
@@ -221,8 +224,8 @@ pr-rerun 123
 pr-rerun status rr_0123456789abcdef0123456789abcdef
 ```
 
-NetBird 用户使用 `pr-rerun login --netbird-server http://100.64.0.10:8080`；
-在服务端本机可以直接 `pr-rerun login`，默认使用 `http://127.0.0.1:8080`。
+NetBird 用户使用 `pr-rerun login --token-login --netbird-server http://100.64.0.10:8080`；
+在服务端本机可以直接 `pr-rerun login --token-login`，默认使用 `http://127.0.0.1:8080`。
 客户端使用已有 API 进行只读认证检查，成功后才保存配置；登录不查询 GitHub、
 不创建预览、不触发重跑，服务端无需为此升级或重启。
 
@@ -235,7 +238,7 @@ NetBird 用户使用 `pr-rerun login --netbird-server http://100.64.0.10:8080`�
 
 ```bash
 # 令牌被轮换/撤销后，输入管理员新发的令牌：
-pr-rerun login
+pr-rerun login --token-login
 
 # 删除本机保存的登录信息：
 pr-rerun logout
@@ -295,7 +298,7 @@ NetBird 内哪些节点能访问，由 NetBird 访问策略决定；应用令牌
 curl --noproxy '*' http://100.64.0.10:8080/healthz
 
 # 首次验证并保存服务地址和个人服务令牌：
-pr-rerun login --netbird-server http://100.64.0.10:8080
+pr-rerun login --token-login --netbird-server http://100.64.0.10:8080
 
 # 后续只需：
 pr-rerun 123
@@ -313,7 +316,7 @@ pr-rerun --netbird-server http://100.64.0.10:8080 123
 pr-rerun --server http://127.0.0.1:8080 123
 ```
 
-也可以 `pr-rerun login --server http://127.0.0.1:8080` 保存本机入口。
+也可以 `pr-rerun login --token-login --server http://127.0.0.1:8080` 保存本机入口。
 回环入口同样需要用户令牌、本人 PR 和手动确认。
 
 `PR_RERUN_NETBIRD_URL` / `--netbird-server` 表示管理员或使用者已确认该

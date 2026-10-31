@@ -4,7 +4,7 @@ import io
 import json
 import re
 import zipfile
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -77,6 +77,7 @@ class GitHub:
         self.repository = repository
         self.prefix = f"/repos/{repository}"
         self._token = token
+        self.before_write: Callable[[], None] | None = None
         # No implicit retries, redirect following, ambient netrc credentials, or
         # credentialed client defaults that could reach artifact storage.
         self._client = httpx.Client(
@@ -112,6 +113,8 @@ class GitHub:
         )
         if not authorized:
             raise ServiceError(400, "Unsupported GitHub operation.")
+        if write and self.before_write is not None:
+            self.before_write()
         headers = {
             "Authorization": f"Bearer {self._token}",
             "Accept": "application/vnd.github+json",

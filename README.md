@@ -32,7 +32,7 @@ credentials stay on each host. See also the
 | ---- | ------------ |
 | [`deploy-git-mirror`](deploy-git-mirror/) | Makes CI clones of a hot repository local. Keeps a bare mirror on the runner and redirects the repo's URLs to it via `url.insteadOf`, turning a network clone into a same-disk hardlink clone (~20 ms). A scheduled job keeps the mirror fresh. |
 | [`netbird-preflight`](netbird-preflight/) | Checks whether a host can join the self-hosted NetBird network before you install anything. Read-only: verifies architecture, DNS, clock skew, CA trust, TCP/UDP reachability, WireGuard capability, and conflicts with existing VPNs. |
-| [`pr-rerun-service`](pr-rerun-service/) | Lets enrolled contributors preview and confirm reruns of their own PRs through NetBird. Ordinary failures rerun failed jobs; the configured Codex Review workflow reruns all jobs. Includes persistent per-user login, a shared client installer, and systemd deployment. |
+| [`pr-rerun-service`](pr-rerun-service/) | Lets enrolled contributors preview and confirm reruns of their own PRs through NetBird. Ordinary failures rerun failed jobs; the configured Codex Review workflow reruns all jobs. Includes GitHub App authentication, independent repository policies, persistent login, a shared client installer, and systemd deployment. |
 
 ## Using a tool
 
@@ -56,7 +56,7 @@ Once a client is installed, each user logs in once with a service token issued
 by the administrator. `100.64.0.10` is an example, not a deployed service address:
 
 ```bash
-pr-rerun login --netbird-server http://100.64.0.10:8080
+pr-rerun login --token-login --netbird-server http://100.64.0.10:8080
 pr-rerun 123
 ```
 

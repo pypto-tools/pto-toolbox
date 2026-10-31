@@ -1,6 +1,8 @@
 """Build plans from current PR checks and independently verifiable run identities."""
 
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
+from fnmatch import fnmatchcase
 
 from pr_rerun.github import GitHub
 from pr_rerun.models import (
@@ -22,12 +24,20 @@ RERUN_CONCLUSIONS = FAILURES | {"cancelled"}
 
 
 class Planner:
-    def __init__(self, github: GitHub, settings: Settings) -> None:
+    def __init__(
+        self,
+        github: GitHub,
+        settings: Settings,
+        authorize: Callable[[Principal], None] | None = None,
+    ) -> None:
+        self.authorize = authorize
         self.github = github
         self.settings = settings
         self.rules = {rule.path: rule for rule in settings.workflows}
 
     def pull(self, principal: Principal, number: int) -> PullRequest:
+        if self.authorize is not None:
+            self.authorize(principal)
         pr = self.github.pull(number)
         if positive_id(pr["user"]["id"]) != principal.github_id:
             raise ServiceError(403, "You may rerun only PRs that you authored.")
@@ -37,6 +47,17 @@ class Planner:
             or pr["base"]["repo"]["full_name"].lower() != self.settings.repository.lower()
         ):
             raise ServiceError(409, "An open PR in the configured repository is required.")
+        if (
+            self.settings.repository_id is not None
+            and pr["base"]["repo"]["id"] != self.settings.repository_id
+        ):
+            raise ServiceError(403, "Repository identity does not match enrollment.")
+        if pr["draft"] and not self.settings.allow_drafts:
+            raise ServiceError(403, "Draft PRs are disabled by repository policy.")
+        if self.settings.base_branches and not any(
+            fnmatchcase(pr["base"]["ref"], pattern) for pattern in self.settings.base_branches
+        ):
+            raise ServiceError(403, "Target branch is not allowed by repository policy.")
         if pr["head"]["repo"] is None:
             raise ServiceError(409, "The PR source repository no longer exists.")
         return PullRequest(
@@ -184,6 +205,7 @@ class Planner:
         if self.pull(principal, number) != pr:
             raise ServiceError(409, "PR changed during lookup; request another preview.")
         return Plan(
+            policy_revision=self.settings.policy_revision,
             repository=self.settings.repository,
             pr=pr,
             runs=tuple(selected),

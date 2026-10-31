@@ -1,0 +1,37 @@
+# Example only: copy to pr-rerun.local.service and adapt all paths and identities.
+# App-mode example: adapt App ID, paths, OS identity and port before installing.
+# The key is a regular file owned by this service user with mode 0600 or 0400.
+[Unit]
+Description=Confirmed GitHub PR reruns over NetBird
+Wants=network-online.target netbird.service
+After=network-online.target netbird.service
+RequiresMountsFor=/opt/pr-rerun-service /home/rerun /var/lib/pr-rerun
+StartLimitIntervalSec=0
+
+[Service]
+Type=exec
+User=rerun
+Group=rerun
+WorkingDirectory=/opt/pr-rerun-service
+Environment=HOME=/home/rerun
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=PR_RERUN_DATABASE=/var/lib/pr-rerun/rerun.sqlite
+Environment=PR_RERUN_APP_ID=123456
+# Set the real Client ID and enable Device Flow to allow GitHub CLI login.
+Environment=PR_RERUN_APP_CLIENT_ID=YOUR_APP_CLIENT_ID
+Environment=PR_RERUN_APP_PRIVATE_KEY_FILE=/home/rerun/.config/pr-rerun/app.pem
+UnsetEnvironment=PR_RERUN_CONFIG PR_RERUN_GITHUB_TOKEN PR_RERUN_GITHUB_TOKEN_FILE GH_TOKEN GITHUB_TOKEN GH_DEBUG PYTHONPATH PYTHONHOME
+ExecStart=/opt/pr-rerun-service/.venv/bin/python -I -m pr_rerun.api --github-auth app --port 8080
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=120
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pr-rerun
+
+[Install]
+WantedBy=multi-user.target

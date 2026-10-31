@@ -16,10 +16,14 @@ from pydantic import Field
 from starlette.concurrency import run_in_threadpool
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from pr_rerun.app_auth import AppAuth
 from pr_rerun.github import GitHub
 from pr_rerun.listener import discover_netbird, listeners
+from pr_rerun.login import DeviceLogin
 from pr_rerun.models import Principal, ServiceError, Settings, StrictModel
 from pr_rerun.planner import Planner
+from pr_rerun.policy import PolicyUpdate, RepositoryName
+from pr_rerun.registry import Registry
 from pr_rerun.service import Service
 from pr_rerun.store import Store
 
@@ -27,12 +31,17 @@ BODY_LIMIT = 4096
 
 
 class PreviewInput(StrictModel):
+    repository: RepositoryName | None = None
     pr: int = Field(gt=0, lt=2**31)
 
 
 class ConfirmInput(StrictModel):
     ticket: str = Field(pattern=r"^[A-Za-z0-9_-]{43}$")
     confirmation: str = Field(min_length=1, max_length=200)
+
+
+class LoginPollInput(StrictModel):
+    ticket: str = Field(pattern=r"^[A-Za-z0-9_-]{43}$")
 
 
 class RequestBoundary:
@@ -62,15 +71,16 @@ class RequestBoundary:
                     scope, receive, safe_send
                 )
                 return
+            limit = 65536 if scope["path"].startswith("/api/repositories/") else BODY_LIMIT
             body = bytearray()
             while True:
                 message = await receive()
                 if message["type"] == "http.disconnect":
                     return
                 body.extend(message.get("body", b""))
-                if len(body) > BODY_LIMIT:
+                if len(body) > limit:
                     await JSONResponse(
-                        {"error": "Request body exceeds 4096 bytes."}, status_code=413
+                        {"error": f"Request body exceeds {limit} bytes."}, status_code=413
                     )(scope, receive, safe_send)
                     return
                 if not message.get("more_body"):
@@ -89,11 +99,32 @@ class RequestBoundary:
         await self.app(scope, receive, safe_send)
 
 
-def create_app(settings: Settings | None = None, github: GitHub | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    github: GitHub | None = None,
+    *,
+    app_auth: AppAuth | None = None,
+    login_transport=None,
+) -> FastAPI:
     settings = settings or Settings.from_env()
     store = Store(settings.database)
-    github = github or GitHub(settings.repository, settings.github_token.get_secret_value())
-    service = Service(Planner(github, settings), store, settings)
+    if settings.app_id is not None:
+        if settings.app_key_file is None:
+            raise ValueError("App private key file is required")
+        service = Registry(
+            settings, store, app_auth or AppAuth(settings.app_id, settings.app_key_file)
+        )
+        close = service.close
+    else:
+        github = github or GitHub(settings.repository, settings.github_token.get_secret_value())
+        service = Service(Planner(github, settings), store, settings)
+        close = github.close
+
+    login = (
+        DeviceLogin(settings.app_client_id, store, login_transport)
+        if settings.app_id and settings.app_client_id
+        else None
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -109,7 +140,9 @@ def create_app(settings: Settings | None = None, github: GitHub | None = None) -
             yield
         finally:
             os.close(descriptor)
-            github.close()
+            close()
+            if login is not None:
+                login.close()
 
     app = FastAPI(
         title="PR Rerun Service",
@@ -120,6 +153,7 @@ def create_app(settings: Settings | None = None, github: GitHub | None = None) -
     )
     app.add_middleware(RequestBoundary)
     app.state.service = service
+    app.state.close = close
 
     def principal(authorization: Annotated[str, Header()] = "") -> Principal:
         return store.authenticate(authorization)
@@ -147,19 +181,65 @@ def create_app(settings: Settings | None = None, github: GitHub | None = None) -
     def health():
         return {"status": "ok"}
 
+    @app.get("/api/auth/config")
+    def auth_config():
+        return {"github_login": login is not None}
+
+    @app.post("/api/auth/device/start")
+    def login_start(request: Request):
+        if login is None:
+            raise ServiceError(503, "GitHub login is not configured on this server.")
+        return login.start(request.client.host if request.client else "unknown")
+
+    @app.post("/api/auth/device/poll")
+    def login_poll(body: LoginPollInput):
+        if login is None:
+            raise ServiceError(503, "GitHub login is not configured on this server.")
+        return login.poll(body.ticket)
+
+    @app.post("/api/auth/logout")
+    def logout(actor: Annotated[Principal, Depends(principal)]):
+        store.logout_session(actor.token_hash)
+        return {"logged_out": True}
+
     @app.post("/api/reruns/preview")
     def preview(body: PreviewInput, actor: Annotated[Principal, Depends(principal)]):
+        if isinstance(service, Registry):
+            return service.preview(actor, body.pr, body.repository)
+        if body.repository is not None and body.repository.lower() != settings.repository.lower():
+            raise ServiceError(403, "Repository is not configured on this server.")
         return service.preview(actor, body.pr)
 
     @app.post("/api/reruns/confirm")
     async def confirm(body: ConfirmInput, actor: Annotated[Principal, Depends(principal)]):
-        result = await run_in_threadpool(service.confirm, actor, body.ticket, body.confirmation)
+        result = await run_in_threadpool(
+            lambda: service.confirm(actor, body.ticket, body.confirmation)
+        )
         status = 202 if result["state"] in {"accepted", "submitting", "validating"} else 200
         return JSONResponse(result, status_code=status)
 
     @app.get("/api/reruns/{request_id}")
     def status(request_id: str, actor: Annotated[Principal, Depends(principal)]):
         return service.status(actor, request_id)
+
+    def registry() -> Registry:
+        if not isinstance(service, Registry):
+            raise ServiceError(404, "Repository policy management requires App mode.")
+        return service
+
+    @app.get("/api/repositories/{owner}/{repo}/policy")
+    def policy(owner: str, repo: str, actor: Annotated[Principal, Depends(principal)]):
+        return registry().policy(f"{owner}/{repo}", actor)
+
+    @app.post("/api/repositories/{owner}/{repo}/policy")
+    def update_policy(
+        owner: str, repo: str, body: PolicyUpdate, actor: Annotated[Principal, Depends(principal)]
+    ):
+        return registry().update_policy(f"{owner}/{repo}", body, actor)
+
+    @app.get("/api/repositories/{owner}/{repo}/history")
+    def history(owner: str, repo: str, actor: Annotated[Principal, Depends(principal)]):
+        return {"history": registry().policies.history(f"{owner}/{repo}", actor)}
 
     return app
 
@@ -174,7 +254,9 @@ def main() -> None:
     )
     mode.add_argument("--local-only", action="store_true", help="Listen on loopback only")
     parser.add_argument(
-        "--github-auth", choices=("token", "gh"), help="Credential source (or PR_RERUN_GITHUB_AUTH)"
+        "--github-auth",
+        choices=("token", "gh", "app"),
+        help="Credential source (or PR_RERUN_GITHUB_AUTH)",
     )
     parser.add_argument("--port", default=8080, type=int)
     args = parser.parse_args()
@@ -203,7 +285,7 @@ def main() -> None:
                 if not server.started:
                     raise ValueError("Server startup did not complete")
         finally:
-            app.state.service.planner.github.close()
+            app.state.close()
     except (ValueError, OSError) as error:
         parser.exit(2, f"Error: {error}\n")
 

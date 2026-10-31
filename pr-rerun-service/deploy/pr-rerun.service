@@ -1,4 +1,5 @@
 # Example only: copy to pr-rerun.local.service and adapt all paths and identities.
+# Legacy gh-mode example. For App mode use pr-rerun-app.service.
 # The configured User must have its own saved gh login and own the state directory.
 [Unit]
 Description=Confirmed GitHub PR reruns over NetBird

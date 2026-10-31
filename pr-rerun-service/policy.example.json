@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "maintainers": [10001],
+  "users": [10002],
+  "allow_drafts": false,
+  "base_branches": ["main", "release/*"],
+  "workflows": [
+    {"path": ".github/workflows/ci.yml", "mode": "failed", "identity": "pull_request"}
+  ],
+  "cooldown_seconds": 60,
+  "max_requests_per_user_per_day": 20,
+  "max_active_requests_per_pr": 1
+}

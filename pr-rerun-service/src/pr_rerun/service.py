@@ -30,7 +30,8 @@ class Service:
             return self.store.result(principal, request_id)
         try:
             self.store.rate_limit(
-                f"confirm-user:{principal.github_id}", self.settings.confirm_interval
+                f"confirm-user:{plan.pr.repository_id}:{principal.github_id}",
+                self.settings.confirm_interval,
             )
             self.store.rate_limit(
                 f"confirm-pr:{plan.pr.repository_id}:{plan.pr.number}",
@@ -38,7 +39,12 @@ class Service:
             )
             if self.planner.build(principal, plan.pr.number).fingerprint != plan.fingerprint:
                 raise ServiceError(409, "PR or workflow state changed; request another preview.")
-            self.store.reserve(request_id, plan)
+            self.store.reserve(
+                request_id,
+                plan,
+                daily_limit=self.settings.daily_limit,
+                active_limit=self.settings.active_limit,
+            )
         except ServiceError as error:
             self.store.finish(request_id, "rejected", str(error))
             return self.store.result(principal, request_id)

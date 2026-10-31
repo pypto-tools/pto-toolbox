@@ -86,6 +86,7 @@ check "systemd installer --help" 0 bash "$P/install-systemd.sh" --help
 check "systemd installer rejects unknown flag" 2 bash "$P/install-systemd.sh" --bogus
 check "systemd installer requires explicit unit" 2 bash "$P/install-systemd.sh"
 check "systemd installer --dry-run" 0 bash "$P/install-systemd.sh" --dry-run "$P/pr-rerun.service"
+check "App systemd installer --dry-run" 0 bash "$P/install-systemd.sh" --dry-run "$P/pr-rerun-app.service"
 check "shared launcher syntax" 0 sh -n "$P/pr-rerun-client"
 
 echo

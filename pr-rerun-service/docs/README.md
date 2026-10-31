@@ -15,6 +15,10 @@ existing client logins and service tokens remain valid, and clients do not need
 an upgrade. Version `0.2.2` added attribution checks for ordinary fork runs whose
 GitHub PR links are empty.
 
+For 0.3.0 App authentication and per-repository policy management, follow the
+[multi-repository guide](multi-repository.md). The setup below describes legacy
+single-repository `gh`/token mode.
+
 ## Behavior
 
 1. The contributor enters a PR number.
@@ -208,7 +212,7 @@ After the administrator installs once, each contributor uses their **own normal
 OS account, without sudo**:
 
 ```bash
-pr-rerun login --netbird-server http://100.64.0.10:8080
+pr-rerun login --token-login --netbird-server http://100.64.0.10:8080
 pr-rerun 123
 ```
 
@@ -224,7 +228,7 @@ machine still needs its own installation.
 Install this project on a Linux/macOS client and log in once:
 
 ```bash
-pr-rerun login --server https://rerun.example.com
+pr-rerun login --token-login --server https://rerun.example.com
 # Enter your personal SERVICE access token issued by the administrator.
 
 # Subsequent invocations, including in new terminals:
@@ -234,8 +238,8 @@ pr-rerun 123
 pr-rerun status rr_0123456789abcdef0123456789abcdef
 ```
 
-NetBird clients use `pr-rerun login --netbird-server http://100.64.0.10:8080`.
-On the service host, plain `pr-rerun login` defaults to `http://127.0.0.1:8080`.
+NetBird clients use `pr-rerun login --token-login --netbird-server http://100.64.0.10:8080`.
+On the service host, plain `pr-rerun login --token-login` defaults to `http://127.0.0.1:8080`.
 Login performs a read-only authentication check through the existing API before
 saving anything. It makes no GitHub calls, creates no preview, and triggers no
 rerun. No server upgrade or restart is required.
@@ -250,7 +254,7 @@ and links, and updates the file atomically.
 
 ```bash
 # After a token is rotated/revoked, enter the replacement token:
-pr-rerun login
+pr-rerun login --token-login
 
 # Remove the locally saved login:
 pr-rerun logout
@@ -316,7 +320,7 @@ Install this project on another NetBird-connected server, then configure:
 curl --noproxy '*' http://100.64.0.10:8080/healthz
 
 # Verify and save the endpoint and personal service token once:
-pr-rerun login --netbird-server http://100.64.0.10:8080
+pr-rerun login --token-login --netbird-server http://100.64.0.10:8080
 
 # Subsequent usage:
 pr-rerun 123
@@ -335,7 +339,7 @@ the NetBird destination address:
 pr-rerun --server http://127.0.0.1:8080 123
 ```
 
-Alternatively, save loopback with `pr-rerun login --server http://127.0.0.1:8080`.
+Alternatively, save loopback with `pr-rerun login --token-login --server http://127.0.0.1:8080`.
 Loopback requests have the same token, authorship, and confirmation requirements.
 
 `PR_RERUN_NETBIRD_URL` / `--netbird-server` asserts that the operator or user has

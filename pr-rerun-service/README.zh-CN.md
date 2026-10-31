@@ -1,9 +1,17 @@
 # PR 重跑服务
 
+App 部署支持通过 GitHub 设备授权登录，无需人工分发服务令牌。
+详见 [GitHub 登录与仓库规则](docs/multi-repository.zh-CN.md)。
+
 面向 PyPTO 贡献者的独立 GitHub Actions 重跑服务。管理员运行一个服务端，
 贡献者登录一次后，用 `pr-rerun 123` 查看并确认重跑**本人开放的 PR**。
 
 [English](README.md) | 中文 | [完整运维说明](docs/README.zh-CN.md)
+
+版本 **0.3.0** 新增 GitHub App 认证和每仓库独立规则：用户授权、工作流、PR 限制、
+额度及规则审计。注册、接入、管理员命令和迁移步骤见
+[多仓库与 App 指南](docs/multi-repository.zh-CN.md)。原有 `gh`/Token 单仓库部署继续
+兼容；多仓库使用需要真实 App 安装授权和 0.3.0 客户端。
 
 ## 功能
 
@@ -75,7 +83,7 @@ sudo bash deploy/install-shared-client.sh
 服务端 NetBird IP：
 
 ```bash
-pr-rerun login --netbird-server http://100.64.0.10:8080
+pr-rerun login --token-login --netbird-server http://100.64.0.10:8080
 # 按隐藏输入提示粘贴个人服务令牌。
 
 # 之后包括新开终端，直接指定 PR：

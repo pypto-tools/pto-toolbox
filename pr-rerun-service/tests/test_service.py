@@ -230,7 +230,6 @@ def test_rate_limit_is_persistent_and_database_has_private_permissions(tmp_path)
         {"pr": "123"},
         {"pr": -1},
         {"pr": 123, "run_id": 777},
-        {"pr": 123, "repository": "other/repo"},
         {"pr": 123, "mode": "all"},
     ],
 )
@@ -522,3 +521,9 @@ def test_expired_run_is_excluded(client, remote):
     remote.runs[101]["created_at"] = "2020-01-01T00:00:00Z"
     plan = preview(client)
     assert [run["run_id"] for run in plan["runs"]] == [202]
+
+
+def test_legacy_server_rejects_another_repository(client, remote):
+    response = client.post("/api/reruns/preview", json={"pr": 123, "repository": "other/repo"})
+    assert response.status_code == 403
+    assert not remote.calls

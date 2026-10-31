@@ -16,6 +16,8 @@ def isolated_login(monkeypatch, tmp_path):
 
 
 def invoke(monkeypatch, *arguments):
+    if arguments and arguments[0] == "login":
+        arguments = (*arguments, "--token-login")
     monkeypatch.setattr("sys.argv", ["pr-rerun", *arguments])
     with pytest.raises(SystemExit) as result:
         main()
@@ -163,3 +165,59 @@ def test_revoked_saved_token_prompts_reauthentication(monkeypatch, capsys):
     output = capsys.readouterr()
     assert "pr-rerun login" in output.err
     assert TOKEN not in output.err
+
+
+def test_login_saves_repository_and_selection_can_be_overridden(monkeypatch):
+    import json
+
+    monkeypatch.setenv("PR_RERUN_ACCESS_TOKEN", TOKEN)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    repositories = []
+
+    def respond(request):
+        if request.url.path == LOGIN_PROBE:
+            return httpx.Response(404, json={"error": "Request not found."})
+        repositories.append(json.loads(request.content).get("repository"))
+        return httpx.Response(
+            200,
+            json={
+                "eligible": False,
+                "repository": repositories[-1],
+                "pr": {
+                    "number": 123,
+                    "title": "Fix",
+                    "author": "alice",
+                    "head_sha": "a" * 40,
+                    "base_ref": "main",
+                    "url": "https://github.com/team/project/pull/123",
+                },
+            },
+        )
+
+    mock_server(monkeypatch, respond)
+    assert invoke(monkeypatch, "login", "--netbird-server", VPN, "--repo", "team/project") == 0
+    saved = load_login()
+    assert saved is not None and saved.repository == "team/project"
+    assert invoke(monkeypatch, "123") == 2
+    assert invoke(monkeypatch, "123", "--repo", "other/project") == 2
+    assert repositories == ["team/project", "other/project"]
+
+
+def test_policy_cli_sends_expected_revision_and_uses_saved_origin(monkeypatch, tmp_path):
+    import json
+
+    save_login(SavedLogin(VPN, True, TOKEN, "team/project"))
+    document = tmp_path / "update.json"
+    body = {"expected_revision": 4, "policy": {"enabled": False}}
+    document.write_text(json.dumps(body))
+    calls = []
+
+    def respond(request):
+        calls.append(request)
+        assert request.url.path == "/api/repositories/team/project/policy"
+        assert json.loads(request.content) == body
+        return httpx.Response(200, json={"revision": 5})
+
+    mock_server(monkeypatch, respond)
+    assert invoke(monkeypatch, "policy", "--policy-file", str(document)) == 0
+    assert len(calls) == 1 and calls[0].method == "POST"

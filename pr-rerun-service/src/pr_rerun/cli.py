@@ -3,9 +3,12 @@
 import argparse
 import getpass
 import ipaddress
+import json
 import os
 import re
 import sys
+import time
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import httpx
@@ -23,7 +26,7 @@ from pr_rerun.client_config import (
 # The existing status route authenticates before returning this exact 404, so
 # login works against deployed 0.1 servers without GitHub calls or mutations.
 LOGIN_PROBE = "/api/reruns/rr_" + "0" * 32
-AUTH_ERROR = "Service access token is invalid or revoked. Run 'pr-rerun login' with a valid token."
+AUTH_ERROR = "Service login is expired or revoked. Run 'pr-rerun login' again."
 
 
 def safe_text(value: object) -> str:
@@ -151,7 +154,62 @@ def show_result(result: dict) -> int:
     return 0 if result["state"] in {"accepted", "rerun_observed"} else 2
 
 
-def run_client(client: httpx.Client, target: str, request_id: str | None) -> int:
+def github_login(server: str, netbird: bool, repository: str | None) -> None:
+    with httpx.Client(
+        base_url=server, timeout=40, follow_redirects=False, trust_env=False
+    ) as client:
+        config = request(client, "GET", "/api/auth/config")
+        if config.get("github_login") is not True:
+            raise ValueError(
+                "GitHub login is not enabled on this server; "
+                "legacy users can use login --token-login."
+            )
+        started = request(client, "POST", "/api/auth/device/start", {})
+        if started.get("verification_uri") != "https://github.com/login/device":
+            raise ValueError("Unexpected GitHub verification URL")
+        ticket, code = started.get("ticket"), started.get("user_code")
+        expires, interval = started.get("expires_in"), started.get("interval")
+        if (
+            not isinstance(ticket, str)
+            or not re.fullmatch(r"[A-Za-z0-9_-]{43}", ticket)
+            or not isinstance(code, str)
+            or not re.fullmatch(r"[A-Z0-9]{4}-[A-Z0-9]{4}", code)
+            or type(expires) is not int
+            or not 1 <= expires <= 1800
+            or type(interval) is not int
+            or not 1 <= interval <= 60
+        ):
+            raise ValueError("Invalid login response")
+        print("Open https://github.com/login/device in your browser.")
+        print(f"Enter code: {code}")
+        print("Waiting for GitHub authorization...")
+        deadline = time.monotonic() + expires
+        while time.monotonic() < deadline:
+            time.sleep(interval)
+            result = request(client, "POST", "/api/auth/device/poll", {"ticket": ticket})
+            if result.get("state") == "authorized":
+                token = result.get("access_token")
+                if not isinstance(token, str) or not re.fullmatch(TOKEN_PATTERN, token):
+                    raise ValueError("Invalid login response")
+                client.headers["Authorization"] = f"Bearer {token}"
+                verify_login(client)
+                save_login(SavedLogin(server, netbird, token, repository))
+                print(f"Logged in as @{safe_text(result['login'])}.")
+                print("Login saved. You can now run: pr-rerun <PR-number>")
+                return
+            interval = result.get("interval")
+            if (
+                result.get("state") != "pending"
+                or type(interval) is not int
+                or not 1 <= interval <= 300
+            ):
+                raise ValueError("Invalid login response")
+        raise ValueError("GitHub login expired; run 'pr-rerun login' again.")
+
+
+def run_client(
+    client: httpx.Client, target: str, request_id: str | None, repository: str | None = None
+) -> int:
     if target == "status":
         if not request_id or not re.fullmatch(r"rr_[0-9a-f]{32}", request_id):
             raise ValueError("Usage: pr-rerun status rr_<request-id>")
@@ -160,7 +218,10 @@ def run_client(client: httpx.Client, target: str, request_id: str | None) -> int
         raise ValueError("Specify a positive PR number, or 'status' and a request ID")
     if not sys.stdin.isatty():
         raise ValueError("An interactive terminal is required to inspect and confirm a PR")
-    preview = request(client, "POST", "/api/reruns/preview", {"pr": int(target)})
+    payload: dict = {"pr": int(target)}
+    if repository is not None:
+        payload["repository"] = repository
+    preview = request(client, "POST", "/api/reruns/preview", payload)
     pr = preview["pr"]
     print(f"Repository: {safe_text(preview['repository'])}")
     print(f"PR #{pr['number']}: {safe_text(pr['title'])}")
@@ -214,6 +275,16 @@ def main() -> None:
         "--netbird-server",
         help="Server at a verified NetBird IP; allows HTTP (or set PR_RERUN_NETBIRD_URL)",
     )
+    parser.add_argument("--repo", help="Target repository; saved as default during login")
+    parser.add_argument(
+        "--policy-file", type=Path, help="For policy: JSON with expected_revision and policy"
+    )
+    parser.add_argument("--history", action="store_true", help="For policy: show policy history")
+    parser.add_argument(
+        "--token-login",
+        action="store_true",
+        help="For login: use a legacy administrator-issued token",
+    )
     args = parser.parse_args()
     try:
         if args.target in {"login", "logout"} and args.request_id is not None:
@@ -226,11 +297,31 @@ def main() -> None:
             if os.environ.get("PR_RERUN_ACCESS_TOKEN"):
                 print("PR_RERUN_ACCESS_TOKEN is still set; unset it to stop using that token.")
             return
+        if args.repo is not None and not re.fullmatch(r"[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+", args.repo):
+            raise ValueError("--repo must be owner/repository")
+        if args.target != "policy" and (args.policy_file is not None or args.history):
+            raise ValueError("Policy options require the policy command")
         saved = load_login()
         server, netbird = configured_endpoint(args.server, args.netbird_server, saved)
+        repository = args.repo or os.environ.get("PR_RERUN_REPOSITORY")
+        if (
+            repository is None
+            and saved is not None
+            and httpx.URL(server) == httpx.URL(saved.server)
+        ):
+            repository = saved.repository
+        if repository is not None and not re.fullmatch(
+            r"[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+", repository
+        ):
+            raise ValueError("Repository must be owner/repository")
         logging_in = args.target == "login"
+        if args.token_login and not logging_in:
+            raise ValueError("--token-login requires the login command")
         if logging_in:
             print(f"Server: {safe_text(server)}")
+            if not args.token_login:
+                github_login(server, netbird, repository)
+                return
         token = selected_token(server, saved, login=logging_in)
         with httpx.Client(
             base_url=server,
@@ -241,13 +332,29 @@ def main() -> None:
         ) as client:
             if logging_in:
                 verify_login(client)
-                save_login(SavedLogin(server, netbird, token))
+                save_login(SavedLogin(server, netbird, token, repository))
                 print(f"Login saved to {safe_text(config_path())} (owner-only access).")
                 print("You can now run: pr-rerun <PR-number>")
                 code = 0
+            elif args.target == "policy":
+                if (
+                    repository is None
+                    or args.request_id is not None
+                    or (args.history and args.policy_file)
+                ):
+                    raise ValueError(
+                        "Use policy --repo owner/repo [--history | --policy-file FILE]"
+                    )
+                path = f"/api/repositories/{repository}/" + (
+                    "history" if args.history else "policy"
+                )
+                payload = json.loads(args.policy_file.read_text()) if args.policy_file else None
+                value = request(client, "POST" if payload is not None else "GET", path, payload)
+                print(json.dumps(value, indent=2))
+                code = 0
             else:
-                code = run_client(client, args.target, args.request_id)
-    except (ValueError, httpx.HTTPError) as error:
+                code = run_client(client, args.target, args.request_id, repository)
+    except (ValueError, OSError, httpx.HTTPError) as error:
         print(f"Error: {safe_text(error)}", file=sys.stderr)
         code = 2
     except (EOFError, KeyboardInterrupt):

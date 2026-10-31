@@ -19,6 +19,7 @@ class SavedLogin:
     server: str
     netbird: bool
     access_token: str = field(repr=False)
+    repository: str | None = None
 
 
 def config_path() -> Path:
@@ -96,7 +97,11 @@ def load_login() -> SavedLogin | None:
                 value = json.loads(source.read(8193))
             if (
                 not isinstance(value, dict)
-                or set(value) != {"version", "server", "netbird", "access_token"}
+                or set(value)
+                not in (
+                    {"version", "server", "netbird", "access_token"},
+                    {"version", "server", "netbird", "access_token", "repository"},
+                )
                 or type(value["version"]) is not int
                 or value["version"] != 1
                 or not isinstance(value["server"], str)
@@ -106,7 +111,13 @@ def load_login() -> SavedLogin | None:
                 or not re.fullmatch(TOKEN_PATTERN, value["access_token"])
             ):
                 raise ValueError
-            return SavedLogin(value["server"], value["netbird"], value["access_token"])
+            repository = value.get("repository")
+            if repository is not None and (
+                not isinstance(repository, str)
+                or not re.fullmatch(r"[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+", repository)
+            ):
+                raise ValueError
+            return SavedLogin(value["server"], value["netbird"], value["access_token"], repository)
         except (ValueError, UnicodeError) as error:
             raise ValueError(
                 "Saved login is invalid; run 'pr-rerun logout', then log in again."
@@ -121,6 +132,7 @@ def save_login(login: SavedLogin) -> None:
             "server": login.server,
             "netbird": login.netbird,
             "access_token": login.access_token,
+            **({"repository": login.repository} if login.repository is not None else {}),
         }
     )
     with _directory(create=True) as directory:
