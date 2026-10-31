@@ -1,28 +1,33 @@
 # PR Rerun Service
 
-App deployments support GitHub device login without manually distributed tokens.
-See [GitHub login and repository policies](docs/multi-repository.md).
+An independently deployed GitHub Actions rerun service for multiple repositories.
+An administrator runs one server; users log in through GitHub once, then use
+`pr-rerun 123` to preview and confirm reruns of **their own open PRs**.
 
-An independent GitHub Actions rerun service for PyPTO contributors. An
-administrator runs one server; contributors log in once and use `pr-rerun 123`
-to inspect and confirm reruns for **their own open PRs**.
+English | [中文](README.zh-CN.md)
 
-English | [中文](README.zh-CN.md) | [Full operator guide](docs/README.md)
+Current version: **0.4.1**. Use GitHub App mode for per-repository authorization
+and policies without manually distributing tokens. Legacy single-repository
+`gh`/token deployments remain supported.
 
-Version **0.3.0** adds GitHub App authentication and independently managed repository
-policies: user grants, workflow rules, PR restrictions, quotas and audited revisions.
-See the [App and repository policy guide](docs/multi-repository.md) for registration,
-bootstrap, maintainer commands and migration. Legacy `gh`/token deployments remain
-supported. Multi-repository use requires an App installation and the 0.3.0 client.
+| Task | Guide |
+| --- | --- |
+| Install or update shared clients on one or more machines | [Standalone clients](docs/client-releases.md) |
+| Log in, select a repository and confirm reruns | [Contributor usage](#contributor-usage) |
+| Register an App, enroll repositories and manage policies | [App and repository policies](docs/multi-repository.md) |
+| Upgrade the server, check status and troubleshoot | [Operations](docs/operations.md) |
+| Legacy deployment, attribution and request-result semantics | [Legacy mode and protocol guide](docs/README.md) |
 
 ## Behavior
 
 - Ordinary CI failures rerun failed jobs. The configured Codex Review workflow
   reruns all jobs in that workflow, after verifying its PR identity artifact.
   Completed cancelled runs qualify only if they contain failed or timed-out jobs.
-- Each contributor receives a separate service token bound to their immutable
-  GitHub user ID. Contributors need neither repository write access nor a `gh` login.
-- The server uses the administrator's saved `gh` login or a dedicated GitHub token.
+- GitHub device login verifies an immutable user ID and issues a persistent service
+  session. Contributors need neither repository write access nor a `gh` login.
+- In App mode, the server obtains temporary installation credentials restricted to
+  the target repository. The App key and GitHub tokens are never sent to clients.
+  Legacy mode uses an administrator's saved `gh` login or dedicated GitHub token.
 - Every rerun requires a preview, explicit confirmation, and server-side state
   revalidation. There is no `--yes`, merge, delete, cancel, or workflow-dispatch API.
 - Remote listeners bind to the local NetBird IP **and interface**. A separate
@@ -35,34 +40,27 @@ ambiguous branches remain excluded; checks run again before each rerun.
 
 ## Server setup
 
-Requires Python 3.10+, Linux, a connected NetBird kernel interface, `ip` from
-iproute2, and direct HTTPS access to GitHub. macOS supports the client and local-only mode.
-Run these commands from `pto-toolbox/pr-rerun-service`:
+The server requires Python 3.10+, Linux, OpenSSL, a connected NetBird kernel
+interface, `ip` from iproute2, and HTTPS connectivity to GitHub. From
+`pto-toolbox/pr-rerun-service`:
 
 ```bash
 python3 -m venv .venv
+.venv/bin/python -m pip install -c requirements.lock .
 source .venv/bin/activate
-pip install -c requirements.lock .
-
-export PR_RERUN_DATABASE="$HOME/.local/share/pr-rerun/rerun.sqlite"
-export PR_RERUN_CONFIG="$PWD/config.example.json"
-
-# Log in as the same OS user that will run the server.
-gh auth login --hostname github.com
-pr-rerun-admin issue alice --github-auth gh
-pr-rerun-server --github-auth gh --port 8080
 ```
 
-Replace `alice` with the contributor's GitHub username. Deliver `access_token`
-privately; issuing another token for the same user revokes the previous one.
-Keep the database/configuration variables set when running administrator commands.
-The server discovers its own NetBird address. Allow the intended peers to reach
-TCP 8080 in NetBird policies. Docker is optional and is not needed for deployment.
+Then follow [App registration and enrollment](docs/multi-repository.md) to configure
+the App, database and policies, and adapt `deploy/pr-rerun-app.service` for systemd
+boot startup. Replace the template's accounts, paths and App ID; keep local
+configuration out of Git. For `gh`/token deployments, use the
+[legacy guide](docs/README.md).
 
-For boot startup, copy `deploy/pr-rerun.service` to
-`deploy/pr-rerun.local.service`, adapt its user, home, project, and database paths,
-and follow the [systemd instructions](docs/README.md#boot-startup-with-systemd).
-Local unit files are ignored by Git.
+Allow the intended peers to reach the service's TCP port (8080 by default) in
+NetBird policies. The server binds only to NetBird and loopback; Docker and public
+inbound access are unnecessary. Running `pr-rerun-server` directly stays in the
+foreground; boot startup requires an installed, enabled systemd service.
+Additional machines need only the client connecting to the existing service.
 
 ## Shared client installation
 
@@ -86,8 +84,23 @@ pr-rerun login --netbird-server http://100.64.0.10:8080 --repo pypto
 
 # Subsequent invocations, including in new terminals:
 pr-rerun 123
+pr-rerun 456 --repo another/project
+pr-rerun repos
+# Optional: clear this user's saved login
 pr-rerun logout
 ```
+
+`--repo pypto` sets the default repository for future bare PR numbers. It accepts a
+full `owner/repo` name or an existing alias; it does not grant access. Use `--repo`
+on an individual rerun to select another enrolled repository without changing the
+saved default. With `access: "authenticated_users"`, users need no individual grant,
+but must still own the PR. Other policies may require explicit access.
+
+Check the preview, then type `y` at `Confirm? [y/N]`; Enter cancels. No eligible
+failed runs means no confirmation prompt. `accepted` means GitHub accepted the
+request, not that CI passed. Use the Actions link to follow the run, or
+`pr-rerun status rr_REQUEST_ID` to inspect the service submission state. Use
+`pr-rerun 123 --verbose` to show excluded runs when troubleshooting.
 
 Login saves the origin and token in `~/.config/pr-rerun/client.json` (or under
 `XDG_CONFIG_HOME`) with directory/file modes `0700`/`0600`. It checks authentication

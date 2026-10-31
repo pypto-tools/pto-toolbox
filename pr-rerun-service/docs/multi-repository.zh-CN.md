@@ -75,7 +75,7 @@ GitHub 的 Actions 写权限比 rerun 更广。服务的工作流客户端只允
 
 ## 首次接入仓库
 
-按主 README 安装 0.3.0，建议首先使用独立环境、独立数据库和空闲端口验证，保留旧
+按主 README 安装当前版本（0.4.1），建议首先使用独立环境、独立数据库和空闲端口验证，保留旧
 服务运行。给 App 服务设置私有环境配置，私钥路径使用绝对路径：
 
 ```bash
@@ -88,28 +88,63 @@ unset PR_RERUN_CONFIG
 ```
 
 以上 ID 为示例。App 模式不读取旧的单仓库配置文件，也不需要个人 `gh` 登录。
-先通过已授权给 App 的目标仓库核实并签发真人服务身份：
+先启动已配置 Device Flow 的服务，仓库管理员通过 GitHub 登录注册身份，再由平台
+管理员查询数字 ID。服务可以在没有已接入仓库时接受登录：
 
 ```bash
-pr-rerun-admin issue repo-admin --github-auth app --repo team/project
-pr-rerun-admin issue contributor --github-auth app --repo team/project
+# 服务终端（前台运行；正式部署使用下文 systemd 模板）
+pr-rerun-server --github-auth app --port 8081
+```
+
+```bash
+# 仓库管理员自己的终端；初次接入前省略 --repo，避免引用尚未设置的别名
+pr-rerun login --netbird-server http://100.64.0.10:8081
+```
+
+```bash
+# 服务主机另一个终端，使用上面同一份 App/数据库环境
 pr-rerun-admin users
 ```
 
-`issue` 会输出一次服务 Token，需私密交付。同一用户重新签发会撤销其原有全局服务
-Token；新增仓库授权时直接复用已有服务身份，不必重复签发。
+将示例 IP 换为实际 NetBird 地址。旧模式兼容命令
+`pr-rerun-admin issue repo-admin --github-auth app --repo team/project` 也能注册身份，
+但会输出令牌并撤销该用户现有令牌及会话，日常接入新仓库无需使用它。
 
 复制 `policy.example.json` 到私有配置目录，将示例 ID 替换为刚才得到的 GitHub 数字
 ID，填写实际工作流路径并检查所有规则，然后由平台管理员在服务端执行：
 
 ```bash
 pr-rerun-admin repo-add team/project --policy-file /path/to/policy.json
-pr-rerun-server --github-auth app --port 8081
+pr-rerun-admin installations
 ```
 
 接入会核实 App 安装、权限、仓库身份、工作流和已签发用户，不会重跑 CI。
 可以先用 `enabled: false` 接入。正式启动使用 `deploy/pr-rerun-app.service` 模板，修改路径、App ID、用户和端口，
-再沿用 NetBird/systemd 的部署说明。App 的真实安装授权必须由仓库方完成，不能靠配置文件模拟。
+按 [systemd 部署步骤](README.zh-CN.md#通过-systemd-开机启动)操作，但使用 App 模板，
+不要复制旧模式模板。使用同一数据库启动 systemd 前，先停止前台测试服务。
+App 的真实安装授权必须由仓库方完成，不能靠配置文件模拟。
+
+## 为已运行的服务添加仓库
+
+1. 仓库方在现有 App 安装中通过 **Only select repositories** 加入目标仓库；无需新建 App。
+2. 平台管理员在服务主机加载相同的 App/数据库环境，执行 `pr-rerun-admin installations`，
+   确认目标仓库已授权且权限满足要求；`not_enrolled` 表示还未登记到服务。
+3. 仓库管理员先通过 GitHub 登录；平台管理员用 `pr-rerun-admin users` 获取已验证的数字 ID。
+4. 准备该仓库的独立规则 JSON，填入管理员 ID 和真实 workflow 路径，再执行
+   `pr-rerun-admin repo-add team/project --policy-file /path/to/policy.json`。
+5. 仓库管理员或服务管理员登录后设置官方别名：
+   `pr-rerun alias set project team/project --official`。
+6. 用 `pr-rerun repos` 检查服务登记，用 `pr-rerun-admin installations` 检查实时 App 授权。
+   用户随后可执行 `pr-rerun 123 --repo project`。上述接入与查询步骤不会触发重跑。
+
+规则保存在服务端 `PR_RERUN_DATABASE` 指向的 SQLite 数据库中，按仓库保存版本和历史；
+输入 JSON 只是导入/更新材料，修改本地文件不会自动生效。不要把规则放到 PR 分支作为授权来源。
+接入新仓库、更新规则无需重启或让已有用户重新登录。
+`repo-add` 用于首次登记，不用于覆盖现有登记；修改规则用下文 `pr-rerun policy`。
+
+要允许所有已登录用户重跑本人 PR，设置 `access: "authenticated_users"`，`users: []`；
+`maintainers` 仍必须是已注册的数字 ID。规则里的 workflow 必须使用真实文件路径，
+Codex Review 还必须提供受支持的身份 artifact，不能仅匹配工作流名称。
 
 ## GitHub 登录
 
@@ -139,10 +174,10 @@ GitHub 登录本身不授予规则管理权限，仍需在仓库规则中指定�
 设置 `allow_drafts: true`、`base_branches: ["*"]` 可允许草稿和所有目标分支。
 将 `cooldown_seconds` 设为 `0`，将 `max_requests_per_user_per_day` 和
 `max_active_requests_per_pr` 都设为 JSON `null`，即可取消使用配额和冷却时间。
-本人 PR 校验、精确确认、同一次运行的重复提交保护仍然有效。
+本人 PR 校验、手动确认、同一次运行的重复提交保护仍然有效。
 服务不会批准等待人工 approval 的 workflow。
 
-App 模式需要 0.3.0 客户端；旧登录文件仍可读取，但旧客户端不能选择仓库。
+使用当前 0.4.1 客户端；旧登录文件仍可读取。仓库查询还要求 App 服务端 0.4.1。
 
 ```bash
 pr-rerun login --netbird-server http://100.64.0.10:8081 --repo team/project
@@ -170,6 +205,8 @@ pr-rerun policy --repo team/project --policy-file /path/to/update.json
   "expected_revision": 1,
   "policy": {
     "enabled": true,
+    "access": "explicit_users",
+    "aliases": ["project"],
     "maintainers": [10001],
     "users": [10002],
     "allow_drafts": false,
@@ -181,6 +218,8 @@ pr-rerun policy --repo team/project --policy-file /path/to/update.json
   }
 }
 ```
+
+更新是整份规则替换，不是局部合并；请保留现有 `access`、`aliases` 和其它仍需使用的字段。
 
 使用真实已签发身份的 ID 和当前规则版本。如果版本冲突，重新获取并审查最新规则。
 回滚时，从历史复制旧规则到 `policy`，但 `expected_revision` 填**当前版本**，提交后
@@ -200,16 +239,9 @@ pr-rerun policy --repo team/project --policy-file /path/to/update.json
 
 禁用规则不依赖 GitHub 可用；重新启用时会再次检查 App 授权和工作流状态。
 
-已经使用 `/opt/pr-rerun-client` 全机共享客户端的机器，可以由该机器管理员在构建
-新版 wheel 后升级软件包。以下从服务源码目录执行；相比 0.2.3，Python 依赖没有变更：
-
-```bash
-sudo /opt/pr-rerun-client/bin/python -I -m pip --isolated install --no-index --no-deps "$PWD/dist/pr_rerun_service-0.3.0-py3-none-any.whl"
-sudo /opt/pr-rerun-client/bin/python -I -m pip --isolated check
-/usr/local/bin/pr-rerun --help
-```
-
-用户仍用普通账号登录，不加 sudo。首次安装脚本会拒绝覆盖已有共享安装，不用于升级。
+客户端更新和旧共享 wheel 迁移统一按[客户端发布指南](client-releases.zh-CN.md)执行。
+不要用历史版本的 wheel 覆盖当前安装。服务端升级、备份和版本核对见
+[运维与排障](operations.zh-CN.md)；`pr-rerun-update` 不升级服务端。
 
 ## 仓库别名（客户端 0.3.1）
 

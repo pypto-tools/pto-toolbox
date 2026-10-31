@@ -100,8 +100,9 @@ References: [registration](https://docs.github.com/en/apps/creating-github-apps/
 
 ## Bootstrap a repository
 
-Install 0.3.0 in an isolated server environment following the main README. Set the
-following in the service's private environment; use an absolute key path:
+Install the current version (0.4.1) in an isolated server environment following
+the main README. Set the following in the service's private environment; use an
+absolute key path:
 
 ```bash
 export PR_RERUN_GITHUB_AUTH=app
@@ -116,17 +117,29 @@ The values above are examples. Use a separate database and unused local test por
 for initial validation; keep the old server running until App access is verified.
 No real rerun is required to enroll or preview a repository.
 
-Users can provision their own identity with GitHub device login before enrollment.
-Use `pr-rerun-admin users` to obtain their verified numeric IDs. Legacy operators
-can also provision identities through an App-authorized repository. `issue` prints a
-new service token once; deliver it privately. Reissuing rotates the user's global
-service token, so reuse existing identities when adding repository grants.
+Start the configured Device Flow service first. Repository maintainers log in through
+GitHub, then the platform operator retrieves their verified numeric IDs. Login works
+before any repository is enrolled:
 
 ```bash
-pr-rerun-admin issue repo-admin --github-auth app --repo team/project
-pr-rerun-admin issue contributor --github-auth app --repo team/project
+# Server terminal (foreground; use the systemd template below for deployment)
+pr-rerun-server --github-auth app --port 8081
+```
+
+```bash
+# Maintainer's own terminal; omit --repo before initial enrollment/alias setup
+pr-rerun login --netbird-server http://100.64.0.10:8081
+```
+
+```bash
+# Another terminal on the service host, with the same App/database environment
 pr-rerun-admin users
 ```
+
+Replace the example IP with the actual NetBird address. The legacy-compatible
+`pr-rerun-admin issue repo-admin --github-auth app --repo team/project` also
+provisions an identity, but prints a token and revokes that user's existing tokens
+and sessions. Adding a repository does not require reissuing identities.
 
 Copy `policy.example.json` to a private configuration directory. Replace its fake
 IDs with the numeric IDs printed above, set actual workflow paths and review all
@@ -134,14 +147,46 @@ rules. Then enroll (the platform operator performs this locally):
 
 ```bash
 pr-rerun-admin repo-add team/project --policy-file /path/to/policy.json
-pr-rerun-server --github-auth app --port 8081
+pr-rerun-admin installations
 ```
 
 `repo-add` validates the current selected-repository App installation, required
 permissions, repository identity, active workflows and enrolled service users.
 It never reruns CI. A disabled policy can be used for initial enrollment.
 Use `deploy/pr-rerun-app.service` as the systemd template and adapt its paths,
-App ID, user and port. Apply the normal NetBird/systemd deployment instructions. No personal `gh` session is required by App mode.
+App ID, user and port. Apply the [systemd deployment steps](README.md#boot-startup-with-systemd)
+using the App template instead of the legacy template. Stop the foreground test
+server before starting systemd on the same database. No personal `gh` session is
+required by App mode.
+
+## Add a repository to a running service
+
+1. The repository owner adds it to the existing App installation using **Only select
+   repositories**. Creating another App is unnecessary.
+2. On the service host, load the same App/database environment and run
+   `pr-rerun-admin installations`. Verify access and permissions; `not_enrolled`
+   means the App can access it but it is not yet enrolled in this service.
+3. The maintainer logs in through GitHub. The platform operator retrieves their
+   verified numeric ID with `pr-rerun-admin users`.
+4. Prepare a separate policy JSON with that maintainer ID and real workflow paths.
+   Run `pr-rerun-admin repo-add team/project --policy-file /path/to/policy.json`.
+5. The logged-in repository maintainer or service administrator can set an official
+   alias: `pr-rerun alias set project team/project --official`.
+6. Check enrollment with `pr-rerun repos` and live App access with
+   `pr-rerun-admin installations`. Users can then run `pr-rerun 123 --repo project`.
+   Enrollment and inventory commands do not trigger reruns.
+
+Policies and their revision history live in the service's SQLite database selected
+by `PR_RERUN_DATABASE`. JSON files are import/update inputs; editing a file alone
+does not change active policy. PR branch files are not an authorization source.
+Enrollment and policy updates require neither a restart nor new user logins.
+`repo-add` is for initial enrollment, not overwriting an existing enrollment; use
+`pr-rerun policy` below to update rules.
+
+To allow every logged-in user to rerun their own PRs, set
+`access: "authenticated_users"` and `users: []`. Maintainers must still be registered
+numeric IDs. Workflow rules need real file paths; Codex Review additionally needs
+the supported identity artifact, not merely a matching workflow name.
 
 ## GitHub login
 
@@ -165,8 +210,8 @@ management: only the configured maintainers can update policy.
 
 ## Contributor and maintainer commands
 
-Upgrade clients to 0.3.0 before using App mode. Existing login files still load;
-legacy clients cannot select a repository on an App server.
+Use the current 0.4.1 client; existing login files still load. Repository listing
+also requires an App-mode server at version 0.4.1.
 
 ```bash
 pr-rerun login --netbird-server http://100.64.0.10:8081 --repo team/project
@@ -177,7 +222,8 @@ pr-rerun status rr_REQUEST_ID
 
 Replace the example address. `--repo` overrides `PR_RERUN_REPOSITORY`, which overrides
 the default saved at login. A saved default is used only for its saved server.
-Each target requires its own repository grant; changing `--repo` is not authorization.
+Each target applies its own access policy (`explicit_users` or `authenticated_users`);
+changing `--repo` is not authorization.
 The confirmation preview includes the full repository and PR identity.
 
 A repository maintainer can inspect and update rules:
@@ -195,6 +241,8 @@ The update file must contain exactly `expected_revision` and the complete `polic
   "expected_revision": 1,
   "policy": {
     "enabled": true,
+    "access": "explicit_users",
+    "aliases": ["project"],
     "maintainers": [10001],
     "users": [10002],
     "allow_drafts": false,
@@ -206,6 +254,9 @@ The update file must contain exactly `expected_revision` and the complete `polic
   }
 }
 ```
+
+Updates replace the complete policy rather than merging a patch; preserve the
+existing `access`, `aliases` and any other settings that should remain in force.
 
 Use real enrolled IDs and the latest revision. A conflict requires fetching and
 reviewing the latest policy again; do not blindly overwrite it. To roll back,
@@ -233,18 +284,10 @@ validation requires an operator-created App and selected repository authorizatio
 Disabling a policy does not require GitHub to be available; re-enabling validates
 App authorization and active workflows again.
 
-For an existing shared client installed under `/opt/pr-rerun-client`, its machine
-administrator can upgrade the package after building the new wheel (run from the
-service source directory). Dependencies are unchanged from 0.2.3:
-
-```bash
-sudo /opt/pr-rerun-client/bin/python -I -m pip --isolated install --no-index --no-deps "$PWD/dist/pr_rerun_service-0.3.0-py3-none-any.whl"
-sudo /opt/pr-rerun-client/bin/python -I -m pip --isolated check
-/usr/local/bin/pr-rerun --help
-```
-
-Log in as the normal user, without sudo. Do not rerun the fresh-install script over
-an existing shared installation; it deliberately refuses to overwrite it.
+Follow the [client release guide](client-releases.md) for updates and migration
+from the old shared wheel. Do not overwrite current installations with historical
+wheels. See [operations](operations.md) for server upgrades, backups and version
+checks; `pr-rerun-update` does not upgrade the server.
 
 ## Repository aliases (client 0.3.1)
 

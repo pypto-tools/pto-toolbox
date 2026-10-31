@@ -1,4 +1,10 @@
-# PR Rerun Service
+# Legacy single-repository mode and rerun protocol
+
+For new deployments use the [App guide](multi-repository.md). See
+[operations](operations.md) for server upgrades and troubleshooting, and
+[client releases](client-releases.md) for shared installation. This document retains
+legacy `gh`/token setup and common rerun protocol details. Manual token issuance is
+not required for App device login.
 
 An independent service that lets enrolled contributors request GitHub Actions
 reruns for **their own open PRs**. The server uses the administrator's GitHub token.
@@ -166,7 +172,8 @@ repository. Grant **Actions: write**, **Checks: read**, and **Pull requests: rea
 Organization policy may require an administrator to approve a fine-grained PAT.
 Do not use a broad personal token merely to work around organization restrictions.
 A pre-issued GitHub App installation token also works but must be refreshed by
-the operator; automatic App token minting is not implemented.
+the operator in this legacy mode. App mode automatically mints and refreshes
+repository-scoped installation tokens; see the [App guide](multi-repository.md).
 
 For unattended service management, set `PR_RERUN_GITHUB_TOKEN_FILE` to a protected
 token file instead of `PR_RERUN_GITHUB_TOKEN`. Do not set both. The process identity

@@ -81,6 +81,54 @@ No re-login is needed after updating, unless the service session has expired/rev
 or its database. To use non-default directories, supply the same `--prefix` and
 `--bin-dir` values to every install/update/rollback command.
 
+## Update succeeded but the command is still old
+
+`sudo pr-rerun-update` updates the shared installation only. It does not modify
+users' PATH, Conda environments or personal launchers. If `pr-rerun repos` reports
+`Specify a positive PR number`, or `--version` is unrecognized, check in the
+**same terminal and environment that failed**:
+
+```bash
+type -a pr-rerun
+command -v pr-rerun
+pr-rerun --version
+/usr/local/bin/pr-rerun --version
+```
+
+If the shared command is 0.4.1 but the plain command is old, fix command precedence.
+First verify with the full path:
+
+```bash
+/usr/local/bin/pr-rerun repos
+```
+
+If the obsolete entry is specifically your own `~/.local/bin/pr-rerun` launcher,
+back it up and link it to the shared command. This example applies only to that
+personal path; run it as the normal user, without sudo:
+
+```bash
+# Check the paths/versions above first; choose another backup name if it exists.
+if [ ! -e "$HOME/.local/bin/pr-rerun.before-shared" ] && \
+   [ ! -L "$HOME/.local/bin/pr-rerun.before-shared" ]; then
+  mv "$HOME/.local/bin/pr-rerun" "$HOME/.local/bin/pr-rerun.before-shared" &&
+    ln -s /usr/local/bin/pr-rerun "$HOME/.local/bin/pr-rerun"
+fi
+hash -r
+pr-rerun --version
+pr-rerun repos
+```
+
+Do not apply that move to arbitrary Conda/venv paths. For those, try
+`export PATH="/usr/local/bin:$PATH"` and `hash -r` in the current shell, verify,
+then decide whether to adjust shell initialization. Activating an environment
+again may change precedence. Resolve shell aliases/functions according to
+`type -a`. Do not delete `~/.config/pr-rerun` or log in again. Each user with an
+old personal installation must check their own command entry.
+
+`repos` also requires an App-mode server at version 0.4.1. If even the full-path
+command reports an old server, follow [operations](operations.md) to upgrade the
+server; repeating the client update will not fix it.
+
 ## Migrate the old shared wheel installation
 
 ```bash

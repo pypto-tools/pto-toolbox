@@ -71,6 +71,48 @@ pr-rerun --version
 `--rollback` 需要之前安装过另一版独立客户端，不会回退服务端或数据库。
 如果使用自定义目录，每次安装、更新及回退都应传入相同的 `--prefix` 和 `--bin-dir`。
 
+## 更新成功，但命令仍是旧版
+
+`sudo pr-rerun-update` 只更新共享版，不会修改每个人的 PATH、Conda 环境或个人启动脚本。
+出现 `pr-rerun repos` 报 `Specify a positive PR number`，或 `--version` 不被识别时，
+先在**出错的同一个终端和环境**检查：
+
+```bash
+type -a pr-rerun
+command -v pr-rerun
+pr-rerun --version
+/usr/local/bin/pr-rerun --version
+```
+
+共享版为 0.4.1、普通命令仍旧时，就是命令优先级问题。可先用完整路径验证：
+
+```bash
+/usr/local/bin/pr-rerun repos
+```
+
+若确认优先命中的是自己不再需要的 `~/.local/bin/pr-rerun` 旧启动文件，
+可备份后链接到共享版；下面只适用于该个人路径，由普通用户执行，不加 sudo：
+
+```bash
+# 先确认上面的路径与版本输出；备份目标已存在时，请另选备份名称。
+if [ ! -e "$HOME/.local/bin/pr-rerun.before-shared" ] && \
+   [ ! -L "$HOME/.local/bin/pr-rerun.before-shared" ]; then
+  mv "$HOME/.local/bin/pr-rerun" "$HOME/.local/bin/pr-rerun.before-shared" &&
+    ln -s /usr/local/bin/pr-rerun "$HOME/.local/bin/pr-rerun"
+fi
+hash -r
+pr-rerun --version
+pr-rerun repos
+```
+
+不要对 Conda/venv 内的其它路径照搬移动命令。若它们优先，可在当前终端先执行
+`export PATH="/usr/local/bin:$PATH"` 和 `hash -r`，验证后再决定是否调整 shell 初始化配置；
+重新激活环境可能再次改变顺序。shell alias/function 需按 `type -a` 的结果单独调整。
+无需删除 `~/.config/pr-rerun` 或重新登录。每个有个人旧版的系统用户都要检查自己的入口。
+
+`repos` 还要求服务端为 App 模式 0.4.1；若完整路径也提示服务端版本不足，请由管理员
+按[运维指南](operations.zh-CN.md)升级服务端，重复更新客户端不能解决。
+
 ## 从旧共享 wheel 安装迁移
 
 ```bash

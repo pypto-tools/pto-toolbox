@@ -1,4 +1,8 @@
-# PR 重跑服务
+# 旧单仓库模式与重跑协议
+
+新部署请使用 [App 与多仓库指南](multi-repository.zh-CN.md)，升级及排障见
+[运维指南](operations.zh-CN.md)，共享客户端见[发布指南](client-releases.zh-CN.md)。
+本文保留旧 `gh`/Token 模式的配置和通用重跑协议说明；手工发令牌不是 App 登录的必需步骤。
 
 独立部署的后台服务：用户预览并确认**自己创建且仍开放的 PR**，服务使用管理员的
 GitHub Token 发起重跑。用户只拿到独立的服务访问令牌。
@@ -18,7 +22,7 @@ GitHub Token 发起重跑。用户只拿到独立的服务访问令牌。
 
 1. 用户输入 PR 编号，后台核对访问令牌绑定的 GitHub 用户 ID 与 PR 作者 ID。
 2. 展示仓库、标题、作者、链接、提交、目标分支、失败任务和重跑范围。
-3. 用户手动输入 `hw-native-sys/pypto#123 @alice`。
+3. 用户核对预览，在 `Confirm? [y/N]` 输入 `y`；回车取消。
 4. 后台重新检查 PR 和运行状态，调用对应的 GitHub 接口。
 
 普通 CI/Docs 失败或超时执行 `rerun failed`；配置中的 Codex Review 工作流含失败

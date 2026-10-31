@@ -1,24 +1,28 @@
 # PR 重跑服务
 
-App 部署支持通过 GitHub 设备授权登录，无需人工分发服务令牌。
-详见 [GitHub 登录与仓库规则](docs/multi-repository.zh-CN.md)。
+独立部署的 GitHub Actions 重跑服务，支持多个仓库。管理员运行一个服务端，
+用户通过 GitHub 登录一次后，用 `pr-rerun 123` 预览并确认重跑**本人开放的 PR**。
 
-面向 PyPTO 贡献者的独立 GitHub Actions 重跑服务。管理员运行一个服务端，
-贡献者登录一次后，用 `pr-rerun 123` 查看并确认重跑**本人开放的 PR**。
+[English](README.md) | 中文
 
-[English](README.md) | 中文 | [完整运维说明](docs/README.zh-CN.md)
+当前版本 **0.4.1**。推荐 GitHub App 模式：每仓库单独授权、独立规则，
+无需人工分发令牌。旧的 `gh`/Token 单仓库模式继续兼容。
 
-版本 **0.3.0** 新增 GitHub App 认证和每仓库独立规则：用户授权、工作流、PR 限制、
-额度及规则审计。注册、接入、管理员命令和迁移步骤见
-[多仓库与 App 指南](docs/multi-repository.zh-CN.md)。原有 `gh`/Token 单仓库部署继续
-兼容；多仓库使用需要真实 App 安装授权和 0.3.0 客户端。
+| 需要做什么 | 文档 |
+| --- | --- |
+| 在一台或多台机器安装、更新共享客户端 | [独立客户端发布指南](docs/client-releases.zh-CN.md) |
+| 日常登录、选择仓库、确认重跑 | [用户使用](#用户使用) |
+| 注册 App、接入仓库、管理规则 | [多仓库与 App 指南](docs/multi-repository.zh-CN.md) |
+| 升级服务、检查状态、排查故障 | [运维与排障](docs/operations.zh-CN.md) |
+| 旧单仓库部署、归属校验和请求结果语义 | [旧模式及协议说明](docs/README.zh-CN.md) |
 
 ## 功能
 
 - 普通 CI 失败只重跑失败任务；配置的 Codex Review 工作流在核实 PR 身份 artifact 后，
   重跑该工作流的全部任务。整体已取消的已结束运行，只有仍含失败或超时任务时才处理。
-- 每人一个绑定 GitHub 稳定用户 ID 的服务令牌，不需要仓库写权限或登录 `gh`。
-- 服务端使用管理员已有的 `gh` 登录，或专用 GitHub Token。
+- GitHub 设备登录验证稳定用户 ID，自动签发持久化服务会话；不需要仓库写权限或登录 `gh`。
+- App 模式使用限制到目标仓库的临时安装凭据执行重跑；App 私钥和 GitHub Token 不发给客户端。
+  旧模式仍使用管理员的 `gh` 登录或专用 GitHub Token。
 - 每次重跑都要求预览、手动确认和服务端状态复查。
   没有 `--yes`，也没有合并、删除、取消或 workflow-dispatch 接口。
 - 远程监听同时绑定本机 NetBird IP 和网卡；本机客户端使用独立回环入口。
@@ -30,33 +34,24 @@ fork CI 的 GitHub PR 关联为空时，会补充核对来源信息和完整分�
 
 ## 服务端安装
 
-需要 Python 3.10+、Linux、已连接的 NetBird 内核网卡、iproute2 的 `ip` 命令，
-并能通过 HTTPS 直连 GitHub。macOS 可使用客户端或本机测试模式。
-在 `pto-toolbox/pr-rerun-service` 目录执行：
+服务端需要 Python 3.10+、Linux、OpenSSL、已连接的 NetBird 内核网卡、iproute2 的
+`ip` 命令，以及到 GitHub 的 HTTPS 连接。在 `pto-toolbox/pr-rerun-service` 执行：
 
 ```bash
 python3 -m venv .venv
+.venv/bin/python -m pip install -c requirements.lock .
 source .venv/bin/activate
-pip install -c requirements.lock .
-
-export PR_RERUN_DATABASE="$HOME/.local/share/pr-rerun/rerun.sqlite"
-export PR_RERUN_CONFIG="$PWD/config.example.json"
-
-# 使用以后运行服务的同一个系统用户登录。
-gh auth login --hostname github.com
-pr-rerun-admin issue alice --github-auth gh
-pr-rerun-server --github-auth gh --port 8080
 ```
 
-把 `alice` 换成贡献者的 GitHub 用户名，将输出的 `access_token` 私密交付。
-对同一用户再次签发会使旧令牌失效。执行管理员命令时保留数据库和配置环境变量。
-服务端自动查询本机 NetBird IP；在 NetBird 策略中允许需要使用的节点访问 TCP 8080。
-部署无需 Docker，可选容器方案仅用于本机测试。
+然后按[App 注册及仓库接入流程](docs/multi-repository.zh-CN.md)配置 App、数据库和规则，
+使用 `deploy/pr-rerun-app.service` 模板设置 systemd 开机启动。模板中的账户、路径和
+App ID 都必须替换；本机配置不要提交 Git。旧 `gh`/Token 部署见
+[旧模式说明](docs/README.zh-CN.md)。
 
-开机启动时，将 `deploy/pr-rerun.service` 复制为
-`deploy/pr-rerun.local.service`，调整系统用户、HOME、项目和数据库路径，
-再按 [systemd 说明](docs/README.zh-CN.md#通过-systemd-开机启动)安装。
-本机服务文件由 Git 忽略。
+NetBird 策略需允许目标节点访问服务 TCP 端口（默认 8080）。服务只监听 NetBird 网卡
+及本机回环地址，无需 Docker 或公网入口。直接运行 `pr-rerun-server` 会占用前台，
+只有安装并启用 systemd 服务后才会在开机时启动。
+其它机器只需安装客户端并连接现有服务，不需要部署新的服务端。
 
 ## 全机共享客户端
 
@@ -78,8 +73,21 @@ pr-rerun login --netbird-server http://100.64.0.10:8080 --repo pypto
 
 # 之后包括新开终端，直接指定 PR：
 pr-rerun 123
+pr-rerun 456 --repo another/project
+pr-rerun repos
+# 可选：清除当前用户的登录状态
 pr-rerun logout
 ```
+
+`--repo pypto` 设置以后只输入 PR 编号时使用的默认仓库。它支持完整 `owner/repo`
+或已配置的别名，不会授予仓库权限。单次重跑用 `--repo` 切换其它已接入仓库，不改变
+保存的默认仓库。仓库规则为 `access: "authenticated_users"` 时，无需逐人授权，
+但仍只能操作本人 PR；其它规则可能要求单独授权。
+
+检查预览后，在 `Confirm? [y/N]` 输入 `y` 提交，回车取消。没有符合条件的失败任务时
+不会要求确认。`accepted` 只表示 GitHub 接受请求，不表示 CI 通过；用 Actions 链接查看
+任务运行结果，用 `pr-rerun status rr_REQUEST_ID` 查询服务提交状态。
+排查任务为何被排除时使用 `pr-rerun 123 --verbose`。
 
 登录将地址和令牌保存在 `~/.config/pr-rerun/client.json`，或 `XDG_CONFIG_HOME`
 指定的目录，目录和文件权限分别为 `0700`、`0600`。登录只验证身份，不触发重跑。
