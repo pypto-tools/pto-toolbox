@@ -72,20 +72,28 @@ jobs:
               /usr/local/bin/pr-rerun --version
               /usr/local/bin/pr-rerun-update --help
               /usr/local/bin/pr-rerun-update --dry-run
+              /usr/local/bin/pr-rerun-update \
+                --bundle "pr-rerun-client-linux-$(uname -m).tar.gz" --checksums SHA256SUMS
               /opt/python/cp39-cp39/bin/python ../tests/check_frozen_client.py /usr/local/bin/pr-rerun
             '
       - name: Verify the portable bundle on the runner
         env:
           ARCH: ${{ matrix.arch }}
         run: |
+          # Hosted runners have writable tool directories. Keep the installer
+          # ownership checks intact and test in a root-owned temporary prefix.
+          sudo install -d -m 0755 /var/tmp/pr-rerun-release-test
           sudo python3 pr-rerun-service/release/client_install.py \
             --bundle "pr-rerun-service/dist/pr-rerun-client-linux-${ARCH}.tar.gz" \
-            --checksums pr-rerun-service/dist/SHA256SUMS
+            --checksums pr-rerun-service/dist/SHA256SUMS \
+            --prefix /var/tmp/pr-rerun-release-test/client \
+            --bin-dir /var/tmp/pr-rerun-release-test/bin
+          export PATH="/var/tmp/pr-rerun-release-test/bin:$PATH"
           pr-rerun --version
           pr-rerun-update --help
           # Test a normal user invoking a root-owned installation.
           pr-rerun alias list
-          python3 pr-rerun-service/tests/check_frozen_client.py /usr/local/bin/pr-rerun
+          python3 pr-rerun-service/tests/check_frozen_client.py /var/tmp/pr-rerun-release-test/bin/pr-rerun
       - uses: actions/upload-artifact@v4
         with:
           name: pr-rerun-client-${{ matrix.arch }}
