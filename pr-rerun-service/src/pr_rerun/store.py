@@ -45,6 +45,13 @@ class Store:
                     token_hash TEXT PRIMARY KEY, github_id INTEGER NOT NULL,
                     expires REAL NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS service_admins (
+                    github_id INTEGER PRIMARY KEY
+                );
+                CREATE TABLE IF NOT EXISTS service_admin_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, github_id INTEGER NOT NULL,
+                    enabled INTEGER NOT NULL, local_uid INTEGER NOT NULL, created REAL NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS rate_limits (
                     key TEXT PRIMARY KEY, at REAL NOT NULL
                 );
@@ -130,6 +137,47 @@ class Store:
             return [
                 dict(row)
                 for row in db.execute("SELECT github_id, login, enabled FROM users ORDER BY login")
+            ]
+
+    def set_service_admin(self, github_id: int, *, enabled: bool) -> None:
+        """Local database-owner operation; never exposed through the HTTP API."""
+        positive_id(github_id)
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if enabled:
+                if not db.execute(
+                    "SELECT 1 FROM users WHERE github_id=? AND enabled=1", (github_id,)
+                ).fetchone():
+                    raise ValueError("Service administrators must have an active verified identity")
+                db.execute("INSERT OR IGNORE INTO service_admins VALUES (?)", (github_id,))
+            else:
+                db.execute("DELETE FROM service_admins WHERE github_id=?", (github_id,))
+            db.execute(
+                "INSERT INTO service_admin_history (github_id, enabled, local_uid, created) "
+                "VALUES (?, ?, ?, ?)",
+                (github_id, int(enabled), os.getuid(), self.clock()),
+            )
+
+    def is_service_admin(self, github_id: int, *, db=None) -> bool:
+        if db is None:
+            with self.connection() as connection:
+                return self.is_service_admin(github_id, db=connection)
+        return bool(
+            db.execute(
+                "SELECT 1 FROM service_admins a JOIN users u USING (github_id) "
+                "WHERE a.github_id=? AND u.enabled=1",
+                (github_id,),
+            ).fetchone()
+        )
+
+    def service_admins(self) -> list[dict]:
+        with self.connection() as db:
+            return [
+                dict(row)
+                for row in db.execute(
+                    "SELECT u.github_id, u.login, u.enabled FROM service_admins a "
+                    "JOIN users u USING (github_id) ORDER BY u.login"
+                )
             ]
 
     def authenticate(self, authorization: str) -> Principal:

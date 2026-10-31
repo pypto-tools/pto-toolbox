@@ -164,3 +164,34 @@ pr-rerun alias remove pypto --repo hw-native-sys/pypto --official
 
 官方别名需要服务端和客户端都升级。切换服务版本前先停服备份数据库；规则写入新的
 `aliases` 字段后，回退到 0.3.0/0.3.1 必须同时恢复对应数据库备份。
+
+## 服务管理员（服务端 0.3.3）
+
+服务管理员可以管理所有已接入仓库的规则、官方别名和仓库管理员列表；仓库管理员
+仍只管理自己负责的仓库。服务管理员角色绑定不可变的 GitHub 用户 ID，独立于仓库
+规则，修改仓库规则或通过 GitHub 登录都不能自行获得该角色。
+
+服务器数据库的所有者在本机授予角色。目标账号需先通过 GitHub 登录，或已通过
+`issue` 校验身份。将 `PR_RERUN_DATABASE` 指向服务数据库，查看 `users` 后使用对应的
+数字 ID（以下为示例）：
+
+```bash
+pr-rerun-admin users
+pr-rerun-admin service-admin grant 123456
+pr-rerun-admin service-admin list
+pr-rerun-admin service-admin revoke 123456
+```
+
+这些命令需要本地私有数据库访问权限，不需要 GitHub 凭据。授予和撤销会记录目标
+GitHub ID、执行命令的本机 UID 和时间，服务不提供授予角色的 HTTP 接口。授权后，
+管理员可以继续使用已有 GitHub 登录状态，在 0.3.2 或更新的客户端执行：
+
+```bash
+pr-rerun alias set pypto hw-native-sys/pypto --official
+pr-rerun alias list --official
+```
+
+规则修改仍检查别名冲突和版本，并记录实际 GitHub 操作者；在提交规则的事务内会
+再次检查角色是否已撤销。服务管理员可以查看已启用仓库的官方别名，但重跑仍需满足
+仓库访问规则、本人 PR 校验和明确确认。撤销用户的服务访问也会阻止管理员操作。
+要永久取消管理员身份，需显式撤销角色；重新启用同一用户时，否则仍会保留原角色。

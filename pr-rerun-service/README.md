@@ -180,3 +180,39 @@ Existing local-only alias commands continue to work without server access.
 Upgrade the server as well as clients for official aliases. Back up the stopped
 database before switching server versions; after policies acquire the new `aliases`
 field, rollback to 0.3.0/0.3.1 requires restoring the corresponding backup.
+
+## Service administrators (server 0.3.3)
+
+Service administrators can manage policies and official aliases for every enrolled
+repository, including its maintainer list. Repository maintainers still manage
+only their assigned repositories. Roles use immutable GitHub user IDs and are
+separate from repository policies; neither a policy update nor GitHub login can
+grant a service administrator role.
+
+The server's database owner grants the role locally after the account has logged
+in through GitHub (or been verified with `issue`). Set `PR_RERUN_DATABASE` to the
+server database, inspect `users`, and use the verified numeric ID:
+
+```bash
+pr-rerun-admin users
+pr-rerun-admin service-admin grant 123456
+pr-rerun-admin service-admin list
+pr-rerun-admin service-admin revoke 123456
+```
+
+The commands require local access to the private server database and do not need
+GitHub credentials. Grants and revocations record the target GitHub ID, local OS
+UID and time. There is no HTTP endpoint for granting this role. After granting,
+the administrator uses their existing GitHub login on a 0.3.2+ client:
+
+```bash
+pr-rerun alias set pypto hw-native-sys/pypto --official
+pr-rerun alias list --official
+```
+
+Policy changes retain conflict checks, revision checks and the actual GitHub actor
+in audit history. Role removal is checked again in the policy update transaction.
+Service administrators can discover enabled repositories' aliases; rerun access,
+PR authorship and explicit confirmation still follow each repository's rules.
+Revoking service access also blocks administrators. Explicitly revoke the role to
+remove it permanently; re-enabling the same identity otherwise retains the role.

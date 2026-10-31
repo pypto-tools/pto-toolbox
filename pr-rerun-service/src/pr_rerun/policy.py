@@ -104,6 +104,7 @@ class PolicyStore:
 
     def aliases(self, principal: Principal) -> dict[str, str]:
         result = {}
+        service_admin = self.store.is_service_admin(principal.github_id)
         with self.store.connection() as db:
             rows = db.execute(
                 "SELECT a.alias, a.repository, r.policy FROM repository_aliases a "
@@ -111,6 +112,9 @@ class PolicyStore:
             ).fetchall()
         for row in rows:
             policy = RepositoryPolicy.model_validate_json(row["policy"])
+            if service_admin and policy.enabled:
+                result[row["alias"]] = row["repository"]
+                continue
             try:
                 self.authorize({"policy": policy}, principal)
             except ServiceError:
@@ -125,8 +129,11 @@ class PolicyStore:
             raise ServiceError(404, "Official alias is unavailable for your account.")
         return value
 
-    @staticmethod
-    def authorize(record: dict, principal: Principal, *, manage: bool = False) -> None:
+    def authorize(
+        self, record: dict, principal: Principal, *, manage: bool = False, db=None
+    ) -> None:
+        if manage and self.store.is_service_admin(principal.github_id, db=db):
+            return
         policy = record["policy"]
         members = policy.maintainers if manage else policy.maintainers + policy.users
         if principal.github_id not in members and not (
@@ -163,7 +170,7 @@ class PolicyStore:
             if active is None or active["github_id"] != principal.github_id:
                 raise ServiceError(401, "Service access token is invalid or revoked.")
             current = RepositoryPolicy.model_validate_json(row["policy"])
-            self.authorize({"policy": current}, principal, manage=True)
+            self.authorize({"policy": current}, principal, manage=True, db=db)
             if row["revision"] != update.expected_revision:
                 raise ServiceError(409, "Policy changed; fetch it again before updating.")
             revision = row["revision"] + 1

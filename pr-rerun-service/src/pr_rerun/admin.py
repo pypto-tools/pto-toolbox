@@ -33,6 +33,14 @@ def main() -> None:
     revoke = commands.add_parser("revoke", help="Revoke a user's token by immutable GitHub user ID")
     revoke.add_argument("github_id", type=int)
     commands.add_parser("users", help="List identities without token hashes or credentials")
+    administrators = commands.add_parser(
+        "service-admin", help="Manage service-wide policy administrators locally"
+    )
+    administrator_commands = administrators.add_subparsers(dest="action", required=True)
+    administrator_commands.add_parser("list", help="List service administrators")
+    for action in ("grant", "revoke"):
+        role = administrator_commands.add_parser(action)
+        role.add_argument("github_id", type=int, help="Verified immutable GitHub user ID")
     args = parser.parse_args()
     os.umask(0o077)
     try:
@@ -42,6 +50,12 @@ def main() -> None:
         store = Store(Path(database))
         if args.command == "users":
             print(json.dumps(store.users(), indent=2))
+        elif args.command == "service-admin":
+            if args.action == "list":
+                print(json.dumps(store.service_admins(), indent=2))
+            else:
+                store.set_service_admin(args.github_id, enabled=args.action == "grant")
+                print("Service administrator role updated.")
         elif args.command == "revoke":
             if not store.revoke(positive_id(args.github_id)):
                 raise ValueError("GitHub user ID was not enrolled")
