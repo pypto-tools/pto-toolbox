@@ -10,6 +10,7 @@ import os
 import subprocess
 import tarfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -251,9 +252,11 @@ def test_no_automatic_downgrade(tmp_path):
 
 
 def test_frozen_downloader_loads_bundled_ca_without_requiring_system_paths(tmp_path, monkeypatch):
-    import certifi
-
     loaded = []
+    certificates = str(tmp_path / "bundled-cacert.pem")
+    monkeypatch.setitem(
+        installer.sys.modules, "certifi", SimpleNamespace(where=lambda: certificates)
+    )
 
     class Context:
         def load_verify_locations(self, path):
@@ -275,5 +278,5 @@ def test_frozen_downloader_loads_bundled_ca_without_requiring_system_paths(tmp_p
     monkeypatch.setattr(installer.urllib.request, "build_opener", build_opener)
     target = tmp_path / "download"
     installer.download("https://github.com/example", target)
-    assert loaded == [certifi.where()]
+    assert loaded == [certificates]
     assert target.read_bytes() == b"downloaded through verified TLS context"
