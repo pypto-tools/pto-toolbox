@@ -33,7 +33,7 @@ grant access to every enrolled repository.
 Set `allow_drafts: true` and `base_branches: ["*"]` to allow drafts targeting any
 branch. Set `cooldown_seconds: 0` and both `max_requests_per_user_per_day` and
 `max_active_requests_per_pr` to JSON `null` to disable usage quotas and cooldowns.
-Author checks, exact confirmation and duplicate run-attempt protection still apply.
+Author checks, explicit confirmation and duplicate run-attempt protection still apply.
 Pending workflow approvals are not approved by this service.
 
 Policies are strict JSON data, not scripts, shell commands, API URLs or credentials.
@@ -178,7 +178,7 @@ pr-rerun status rr_REQUEST_ID
 Replace the example address. `--repo` overrides `PR_RERUN_REPOSITORY`, which overrides
 the default saved at login. A saved default is used only for its saved server.
 Each target requires its own repository grant; changing `--repo` is not authorization.
-The existing exact confirmation includes the full repository and PR identity.
+The confirmation preview includes the full repository and PR identity.
 
 A repository maintainer can inspect and update rules:
 
@@ -349,7 +349,16 @@ check. Run selection and exclusions keep their original ordering; a failed looku
 rejects the entire plan. Rerun writes remain sequential and are never retried
 implicitly. The service logs plan lookup duration and run counts without credentials.
 
-Upgrade clients for progress output, and the server for concurrent lookups. Exact
+Upgrade clients for progress output, and the server for concurrent lookups. Explicit
 confirmation remains required whenever eligible runs are found; no eligible runs
 means no confirmation and no rerun. GitHub/network latency still affects response
 time, and an accepted submission does not wait for CI completion.
+
+## Short confirmation (client 0.3.5)
+
+After showing the full repository, PR, author and planned reruns, the client asks
+`Confirm? [y/N]`. Type `y` to submit; Enter, `n` or any other input cancels.
+Uppercase `Y` and surrounding whitespace are accepted. No need to copy the full
+repository/PR identity. The client sends the original preview's confirmation and
+ticket only after this explicit approval, so server validation is unchanged.
+This is a client-only update and does not require a server restart.

@@ -354,10 +354,10 @@ def run_client(
         print(f"    {safe_text(run['url'])}")
     request_id = preview["request_id"]
     print(f"Request ID: {safe_text(request_id)}")
-    print(f"Type exactly: {safe_text(preview['confirmation'])}")
-    answer = input("> ")
-    if answer != preview["confirmation"]:
-        print("Confirmation did not match. No rerun was requested.")
+    print(f"Confirm reruns for: {safe_text(preview['confirmation'])}")
+    answer = input("Confirm? [y/N] ").strip().lower()
+    if answer != "y":
+        print("Cancelled. No rerun was requested.")
         return 1
     try:
         with progress("Rechecking PR state and submitting confirmed reruns"):
@@ -367,7 +367,7 @@ def run_client(
                 "/api/reruns/confirm",
                 {
                     "ticket": preview["ticket"],
-                    "confirmation": answer,
+                    "confirmation": preview["confirmation"],
                 },
             )
     except (httpx.HTTPError, ValueError):

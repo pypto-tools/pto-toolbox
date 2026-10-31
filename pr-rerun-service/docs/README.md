@@ -26,7 +26,7 @@ single-repository `gh`/token mode.
    author, then discovers the PR's current Actions checks.
 3. The CLI displays the repository, PR, author, commit, target branch, failed jobs,
    and proposed operations.
-4. The contributor types `hw-native-sys/pypto#123 @alice` exactly.
+4. The contributor checks the full repository/PR identity and types `y` at `Confirm? [y/N]`.
 5. The service rechecks the PR and run attempts and requests the approved reruns.
 
 Ordinary CI/Docs failures use `rerun-failed-jobs`. The configured Codex Review
@@ -262,7 +262,7 @@ pr-rerun logout
 
 Failed login leaves the previous configuration intact. Logout does not revoke
 the token on the server or affect other machines. Every rerun still requires
-PR inspection and exact manual confirmation, and author-only checks still apply.
+PR inspection and explicit manual confirmation, and author-only checks still apply.
 
 Endpoint precedence is command-line arguments, environment, saved endpoint, then
 loopback. `PR_RERUN_ACCESS_TOKEN` overrides the saved token. Otherwise, the saved
@@ -513,3 +513,12 @@ References:
 - [GitHub workflow rerun endpoints](https://docs.github.com/en/rest/actions/workflow-runs)
 - [GitHub rerun semantics and 30-day limit](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs)
 - [GitHub Checks API and fork PR association](https://docs.github.com/en/rest/checks/runs)
+
+## Short confirmation (client 0.3.5)
+
+After showing the full repository, PR, author and planned reruns, the client asks
+`Confirm? [y/N]`. Type `y` to submit; Enter, `n` or any other input cancels.
+Uppercase `Y` and surrounding whitespace are accepted. No need to copy the full
+repository/PR identity. The client sends the original preview's confirmation and
+ticket only after this explicit approval, so server validation is unchanged.
+This is a client-only update and does not require a server restart.

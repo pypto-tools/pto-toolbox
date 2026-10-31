@@ -453,3 +453,10 @@ python -m build
 - [GitHub 重跑接口](https://docs.github.com/en/rest/actions/workflow-runs)
 - [GitHub 重跑语义与 30 天限制](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs)
 - [GitHub Checks API 的 fork PR 限制](https://docs.github.com/en/rest/checks/runs)
+
+## 简短确认（客户端 0.3.5）
+
+客户端显示完整仓库、PR、作者和待重跑任务后，会询问 `Confirm? [y/N]`。
+输入 `y` 才提交，直接回车、输入 `n` 或其他内容均取消；大写 `Y` 和两侧空格也接受。
+无需复制完整仓库和 PR 身份文字。客户端只在明确确认后发送原预览的确认字段和
+凭据，服务端校验保持不变。这次仅需更新客户端，不需要重启服务端。

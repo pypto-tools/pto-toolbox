@@ -142,10 +142,20 @@ def test_no_noninteractive_confirmation(monkeypatch):
             run_client(client, "123", None)
 
 
-@pytest.mark.parametrize("answer,expected_posts", [("yes", 1), ("owner/repo#123 @alice", 2)])
-def test_cli_requires_exact_confirmation(monkeypatch, capsys, answer, expected_posts):
+@pytest.mark.parametrize(
+    "answer,expected_posts",
+    [("", 1), ("n", 1), ("yes", 1), ("owner/repo#123 @alice", 1), ("y", 2), (" Y ", 2)],
+)
+def test_cli_requires_explicit_yes_and_preserves_server_confirmation(
+    monkeypatch, capsys, answer, expected_posts
+):
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
-    monkeypatch.setattr("builtins.input", lambda prompt: answer)
+
+    def respond_to_prompt(prompt):
+        assert prompt == "Confirm? [y/N] "
+        return answer
+
+    monkeypatch.setattr("builtins.input", respond_to_prompt)
     calls = []
 
     def respond(request):
@@ -199,11 +209,13 @@ def test_cli_requires_exact_confirmation(monkeypatch, capsys, answer, expected_p
     output = capsys.readouterr().out
     assert "\x1b" not in output
     assert r"\x1b" in output
+    assert "Confirm reruns for: owner/repo#123 @alice" in output
+    assert "Type exactly" not in output
 
 
 def test_cli_reports_request_id_after_lost_confirmation_response(monkeypatch, capsys):
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
-    monkeypatch.setattr("builtins.input", lambda prompt: "owner/repo#123 @alice")
+    monkeypatch.setattr("builtins.input", lambda prompt: "y")
     request_id = "rr_" + "a" * 32
 
     def respond(request):

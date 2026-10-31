@@ -23,7 +23,7 @@ supported. Multi-repository use requires an App installation and the 0.3.0 clien
 - Each contributor receives a separate service token bound to their immutable
   GitHub user ID. Contributors need neither repository write access nor a `gh` login.
 - The server uses the administrator's saved `gh` login or a dedicated GitHub token.
-- Every rerun requires a preview, exact confirmation text, and server-side state
+- Every rerun requires a preview, explicit confirmation, and server-side state
   revalidation. There is no `--yes`, merge, delete, cancel, or workflow-dispatch API.
 - Remote listeners bind to the local NetBird IP **and interface**. A separate
   loopback listener serves clients on the server host. Discovery failures abort startup.
@@ -232,7 +232,16 @@ check. Run selection and exclusions keep their original ordering; a failed looku
 rejects the entire plan. Rerun writes remain sequential and are never retried
 implicitly. The service logs plan lookup duration and run counts without credentials.
 
-Upgrade clients for progress output, and the server for concurrent lookups. Exact
+Upgrade clients for progress output, and the server for concurrent lookups. Explicit
 confirmation remains required whenever eligible runs are found; no eligible runs
 means no confirmation and no rerun. GitHub/network latency still affects response
 time, and an accepted submission does not wait for CI completion.
+
+## Short confirmation (client 0.3.5)
+
+After showing the full repository, PR, author and planned reruns, the client asks
+`Confirm? [y/N]`. Type `y` to submit; Enter, `n` or any other input cancels.
+Uppercase `Y` and surrounding whitespace are accepted. No need to copy the full
+repository/PR identity. The client sends the original preview's confirmation and
+ticket only after this explicit approval, so server validation is unchanged.
+This is a client-only update and does not require a server restart.
