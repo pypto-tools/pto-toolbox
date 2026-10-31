@@ -77,7 +77,11 @@ def test_app_configuration_never_loads_a_personal_token(monkeypatch, tmp_path):
         "pr_rerun.models.github_credential",
         lambda mode: pytest.fail("Personal credential must not be loaded"),
     )
+    monkeypatch.setenv("PR_RERUN_LOGIN_PROXY", "http://user:private-test-secret@127.0.0.1:7890")
     settings = Settings.from_env(github_auth="app")
+    assert settings.login_proxy is not None
+    assert settings.login_proxy.get_secret_value().endswith("@127.0.0.1:7890")
+    assert "private-test-secret" not in repr(settings)
     assert settings.app_id == 123
     assert settings.app_key_file == tmp_path / "app.pem"
 

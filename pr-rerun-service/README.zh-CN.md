@@ -225,3 +225,21 @@ pr-rerun alias list --official
 会简短说明不会提交。需要排查原因时使用 `pr-rerun 123 --verbose`，也可以配合
 `--repo`。这只调整客户端显示，归属检查、workflow 选择和确认保持不变。
 升级客户端即可，不需要重启服务端。
+
+## GitHub 登录连通性（服务端 0.3.7）
+
+设备登录需要服务主机能访问 `github.com/login/device/code`、
+`github.com/login/oauth/access_token` 和 `api.github.com/user`。
+仓库 API 可用不代表登录网站也可达。客户端已经通过 NetBird 连上服务后，申请
+授权码或等待授权时报错，仍可能是服务主机到 GitHub 的连接问题。
+
+如果直连登录接口失败，服务管理员可以在服务端环境中显式设置可信 HTTP(S) 代理
+`PR_RERUN_LOGIN_PROXY`，例如 `http://127.0.0.1:7890`，然后重启服务。
+代理地址含凭据时使用受保护的 systemd EnvironmentFile。代理必须能被服务进程
+访问。此设置仅作用于设备授权和身份查询；重跑请求及客户端到服务的连接路线不变。
+通用 HTTP_PROXY/HTTPS_PROXY/ALL_PROXY 环境变量仍不自动读取，不跟随重定向，
+也不关闭 TLS 校验。此设置不支持 SOCKS 代理。
+
+登录错误日志会记录操作阶段及 HTTP 状态码或异常类型，不记录授权码、令牌、代理
+凭据或响应正文。服务关闭 HTTP 库的普通请求日志，避免签名 artifact 下载链接
+进入日志。现有客户端无需重装或清除登录状态即可使用此次服务端更新。

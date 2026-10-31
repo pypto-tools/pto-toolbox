@@ -1,6 +1,7 @@
 """Server-owned GitHub device authorization; no GitHub credential reaches the CLI."""
 
 import json
+import logging
 import re
 import secrets
 import threading
@@ -13,6 +14,8 @@ from pr_rerun.github import GitHub
 from pr_rerun.models import ServiceError, positive_id
 from pr_rerun.store import Store, digest
 
+LOG = logging.getLogger("pr_rerun.login")
+
 
 @dataclass
 class PendingLogin:
@@ -23,11 +26,30 @@ class PendingLogin:
 
 
 class DeviceLogin:
-    def __init__(self, client_id: str, store: Store, transport=None, clock=time.monotonic):
+    def __init__(
+        self, client_id: str, store: Store, transport=None, clock=time.monotonic, *, proxy=None
+    ):
         self.client_id, self.store, self.clock = client_id, store, clock
-        self.client = httpx.Client(
-            timeout=30, trust_env=False, follow_redirects=False, transport=transport
-        )
+        try:
+            if proxy is not None:
+                address = httpx.URL(proxy)
+                if (
+                    address.scheme not in {"http", "https"}
+                    or not address.host
+                    or address.path not in {"", "/"}
+                    or address.query
+                    or address.fragment
+                ):
+                    raise ValueError
+            self.client = httpx.Client(
+                timeout=30,
+                trust_env=False,
+                follow_redirects=False,
+                transport=transport,
+                proxy=proxy,
+            )
+        except (ValueError, httpx.InvalidURL):
+            raise ValueError("PR_RERUN_LOGIN_PROXY must be a valid HTTP(S) proxy origin") from None
         self.pending: dict[str, PendingLogin] = {}
         self.lock = threading.Lock()
 
@@ -37,6 +59,11 @@ class DeviceLogin:
 
     def call(self, path: str, payload: dict | None = None, token: str | None = None):
         url = "https://api.github.com/user" if token else "https://github.com" + path
+        operation = (
+            "identity"
+            if token
+            else ("device_code" if path == "/login/device/code" else "token_poll")
+        )
         headers = {"Accept": "application/json"}
         if token:
             headers["Authorization"] = "Bearer " + token
@@ -45,12 +72,16 @@ class DeviceLogin:
                 "GET" if token else "POST", url, headers=headers, data=payload
             ) as response:
                 if response.status_code != 200:
+                    LOG.warning(
+                        "GitHub login operation=%s status=%d", operation, response.status_code
+                    )
                     raise ServiceError(502, "GitHub login is unavailable; try again later.")
                 value = json.loads(GitHub._read_bounded(response))
                 if not isinstance(value, dict):
                     raise ValueError
                 return value
-        except (httpx.HTTPError, ValueError):
+        except (httpx.HTTPError, ValueError) as error:
+            LOG.warning("GitHub login operation=%s failure=%s", operation, type(error).__name__)
             raise ServiceError(502, "GitHub login is unavailable; try again later.") from None
 
     def start(self, address: str):

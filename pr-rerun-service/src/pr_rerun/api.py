@@ -121,7 +121,12 @@ def create_app(
         close = github.close
 
     login = (
-        DeviceLogin(settings.app_client_id, store, login_transport)
+        DeviceLogin(
+            settings.app_client_id,
+            store,
+            login_transport,
+            proxy=settings.login_proxy.get_secret_value() if settings.login_proxy else None,
+        )
         if settings.app_id and settings.app_client_id
         else None
     )
@@ -270,6 +275,9 @@ def main() -> None:
     args = parser.parse_args()
     os.umask(0o077)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+    # HTTP libraries can include signed artifact URLs in routine request logs.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     if not 1 <= args.port <= 65535:
         parser.error("--port must be between 1 and 65535")
     try:

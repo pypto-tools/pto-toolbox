@@ -371,3 +371,27 @@ if none qualify, it reports that nothing will be submitted. To inspect why runs
 were skipped, use `pr-rerun 123 --verbose` (also works with `--repo`). This only
 changes client output: ownership checks, workflow selection and confirmation
 remain unchanged. Upgrade the client; no server restart is needed.
+
+## GitHub login connectivity (server 0.3.7)
+
+Device login requires the server to reach `github.com/login/device/code` and
+`github.com/login/oauth/access_token`, as well as `api.github.com/user`. Working
+repository API access alone does not prove that login is reachable. A failure
+before the device code or during authorization polling can be a server-side
+connection problem, even when the client can reach the service over NetBird.
+
+If direct login connections fail, the operator can explicitly configure a trusted
+HTTP(S) proxy using `PR_RERUN_LOGIN_PROXY`, for example
+`http://127.0.0.1:7890`, in the server's environment and restart the service.
+Use a protected systemd EnvironmentFile if the proxy URL contains credentials.
+The proxy must be reachable from the server process. This setting applies only
+to device authorization and identity lookup; rerun traffic and client-to-service
+traffic keep their existing routes. Ambient HTTP_PROXY/HTTPS_PROXY/ALL_PROXY
+variables remain ignored, redirects remain disabled, and TLS stays verified.
+SOCKS proxies are not supported by this setting.
+
+Login failure logs identify the operation and HTTP status or exception class,
+without logging authorization codes, tokens, proxy credentials or response bodies.
+Routine HTTP library request logs are suppressed to avoid signed artifact URLs
+appearing in the service journal. Existing clients can use this server update
+without reinstalling or clearing their saved login.

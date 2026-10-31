@@ -211,3 +211,62 @@ def test_api_rejects_client_asserted_identity(settings):
             ).status_code
             == 422
         )
+
+
+def test_explicit_login_proxy_is_used_without_ambient_proxy(flow, monkeypatch):
+    _, store, _, _ = flow
+    original_client = httpx.Client
+    seen = []
+    monkeypatch.setenv("HTTPS_PROXY", "http://unwanted.invalid:9999")
+
+    def client(**kwargs):
+        seen.append(kwargs.pop("proxy"))
+        assert kwargs["trust_env"] is False and kwargs["follow_redirects"] is False
+        kwargs["transport"] = httpx.MockTransport(lambda request: httpx.Response(200, json={}))
+        return original_client(**kwargs)
+
+    monkeypatch.setattr("pr_rerun.login.httpx.Client", client)
+    auth = DeviceLogin("test-app", store, proxy="http://127.0.0.1:7890")
+    try:
+        assert auth.call("/login/device/code", {}) == {}
+        assert auth.call("/user", token="private-test-token") == {}
+        assert seen == ["http://127.0.0.1:7890"]
+    finally:
+        auth.close()
+
+
+@pytest.mark.parametrize(
+    "proxy",
+    [
+        "socks5://127.0.0.1:1080",
+        "http://proxy.invalid/path",
+        "http://proxy.invalid/?password=private-test-secret",
+        "http://user:private-test-secret@proxy.invalid:bad",
+    ],
+)
+def test_invalid_login_proxy_is_rejected_without_echoing_credentials(flow, proxy):
+    _, store, _, _ = flow
+    with pytest.raises(ValueError) as error:
+        DeviceLogin("test-app", store, proxy=proxy)
+    assert "PR_RERUN_LOGIN_PROXY" in str(error.value)
+    assert "private-test-secret" not in str(error.value)
+
+
+@pytest.mark.parametrize("failure", ["timeout", "http_error", "invalid_json"])
+def test_login_diagnostics_record_stage_without_sensitive_data(flow, caplog, failure):
+    auth, store, _, _ = flow
+
+    def remote(request):
+        if failure == "timeout":
+            raise httpx.ConnectTimeout("private-test-secret", request=request)
+        if failure == "http_error":
+            return httpx.Response(503, text="private-test-secret")
+        return httpx.Response(200, text="private-test-secret")
+
+    auth.client.close()
+    auth.client = httpx.Client(transport=httpx.MockTransport(remote))
+    with pytest.raises(ServiceError):
+        auth.call("/login/device/code", {"client_id": "test-app"})
+    assert "operation=device_code" in caplog.text
+    assert "private-test-secret" not in caplog.text
+    assert store.users() == []

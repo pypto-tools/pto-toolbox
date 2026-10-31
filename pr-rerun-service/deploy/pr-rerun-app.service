@@ -19,6 +19,8 @@ Environment=PR_RERUN_DATABASE=/var/lib/pr-rerun/rerun.sqlite
 Environment=PR_RERUN_APP_ID=123456
 # Set the real Client ID and enable Device Flow to allow GitHub CLI login.
 Environment=PR_RERUN_APP_CLIENT_ID=YOUR_APP_CLIENT_ID
+# Optional trusted HTTP(S) proxy for GitHub device login only.
+# Environment=PR_RERUN_LOGIN_PROXY=http://127.0.0.1:7890
 Environment=PR_RERUN_APP_PRIVATE_KEY_FILE=/home/rerun/.config/pr-rerun/app.pem
 UnsetEnvironment=PR_RERUN_CONFIG PR_RERUN_GITHUB_TOKEN PR_RERUN_GITHUB_TOKEN_FILE GH_TOKEN GITHUB_TOKEN GH_DEBUG PYTHONPATH PYTHONHOME
 ExecStart=/opt/pr-rerun-service/.venv/bin/python -I -m pr_rerun.api --github-auth app --port 8080

@@ -61,6 +61,7 @@ class Settings(StrictModel):
     app_id: int | None = Field(default=None, gt=0)
     app_client_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_.-]{1,100}$")
     app_key_file: Path | None = Field(default=None, repr=False)
+    login_proxy: SecretStr | None = Field(default=None, repr=False)
     policy_revision: int = Field(default=0, ge=0)
     repository_id: int | None = Field(default=None, gt=0)
     allow_drafts: bool = True
@@ -107,6 +108,11 @@ class Settings(StrictModel):
                 github_token=SecretStr("installation-managed"),
                 app_id=app_id,
                 app_client_id=os.environ.get("PR_RERUN_APP_CLIENT_ID") or None,
+                login_proxy=(
+                    SecretStr(os.environ["PR_RERUN_LOGIN_PROXY"])
+                    if os.environ.get("PR_RERUN_LOGIN_PROXY")
+                    else None
+                ),
                 app_key_file=Path(key_file),
             )
         token = github_credential(github_auth)
