@@ -110,7 +110,8 @@ GitHub Release 获取。离线安装不会访问 GitHub、PyPI 或 rerun 服务�
 1. 更新 `src/pr_rerun/version.py`、`pyproject.toml`、旧安装器中的版本，以及
    `docs/releases/` 下的中英文发布说明。
 2. 推送代码。`PR rerun release` 工作流测试服务端和安装器，使用原生架构的
-   `manylinux_2_28` 容器及 Python 3.12 构建两种客户端，在容器中用 Python 3.9
+   `manylinux_2_28` 容器及 uv 管理的共享版 CPython 3.12.16 构建两种客户端
+   （镜像自带 Python 是静态版，无法用于打包），在容器中用 Python 3.9
    验证安装，并在宿主 runner 再次执行安装包。
 3. 为验证通过的提交创建并推送 `pr-rerun-vX.Y.Z` 标签。全部任务通过后才发布两种客户端、
    服务 wheel、`install-client.py` 和 `SHA256SUMS`。标签必须与包内版本一致。

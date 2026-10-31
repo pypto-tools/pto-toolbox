@@ -125,7 +125,8 @@ mode does not contact GitHub, PyPI, or the rerun service.
    and bilingual release notes under `docs/releases/`.
 2. Push the tested change. The `PR rerun release` workflow tests the service and
    installer, and builds both clients in native `manylinux_2_28` containers with
-   Python 3.12. It exercises installation with Python 3.9 inside each container
+   a uv-managed shared CPython 3.12.16 (the image's Python is static and cannot be
+   frozen). It exercises installation with Python 3.9 inside each container
    and executes the bundle again on the host runner.
 3. Tag the tested commit `pr-rerun-vX.Y.Z` and push that tag. Only after all jobs
    pass does the workflow publish the two client archives, service wheel,

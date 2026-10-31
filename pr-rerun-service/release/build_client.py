@@ -84,7 +84,17 @@ def main():
     )
     licenses = output / "licenses"
     licenses.mkdir()
-    python_license = Path(sysconfig.get_path("stdlib")) / "LICENSE.txt"
+    python_licenses = Path(sys.base_prefix) / "licenses"
+    if python_licenses.is_dir():
+        shutil.copytree(python_licenses, licenses / "python-runtime")
+    candidates = (
+        Path(sysconfig.get_path("stdlib")) / "LICENSE.txt",
+        Path(sys.base_prefix) / "LICENSE.txt",
+        python_licenses / "LICENSE.cpython.txt",
+    )
+    python_license = next((path for path in candidates if path.is_file()), None)
+    if python_license is None:
+        raise SystemExit("The Python distribution must include its license")
     shutil.copyfile(python_license, licenses / "Python.txt")
     for name in RUNTIME:
         distribution = importlib.metadata.distribution(name)

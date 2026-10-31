@@ -60,7 +60,9 @@ jobs:
           docker run --rm -v "$PWD:/workspace" -w /workspace/pr-rerun-service \
             -e RELEASE_TAG -e GITHUB_SHA \
             "quay.io/pypa/manylinux_2_28_${ARCH}" bash -euc '
-              /opt/python/cp312-cp312/bin/python -m venv /tmp/client-build
+              # manylinux Python is static; freezing needs a shared libpython.
+              UV_PYTHON_INSTALL_DIR=/tmp/build-python uv venv --managed-python \
+                --python "cpython-3.12.16-linux-$(uname -m)-gnu" --seed /tmp/client-build
               /tmp/client-build/bin/python -m pip install -r release/requirements-build.lock
               /tmp/client-build/bin/python release/build_client.py
               cd dist
