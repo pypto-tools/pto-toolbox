@@ -146,8 +146,9 @@ def test_no_noninteractive_confirmation(monkeypatch):
     "answer,expected_posts",
     [("", 1), ("n", 1), ("yes", 1), ("owner/repo#123 @alice", 1), ("y", 2), (" Y ", 2)],
 )
+@pytest.mark.parametrize("verbose", [False, True])
 def test_cli_requires_explicit_yes_and_preserves_server_confirmation(
-    monkeypatch, capsys, answer, expected_posts
+    monkeypatch, capsys, answer, expected_posts, verbose
 ):
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
 
@@ -165,6 +166,7 @@ def test_cli_requires_explicit_yes_and_preserves_server_confirmation(
                 200,
                 json={
                     "eligible": True,
+                    "skipped": ["Run 456: completed / success."],
                     "repository": "owner/repo",
                     "pr": {
                         "number": 123,
@@ -204,13 +206,14 @@ def test_cli_requires_explicit_yes_and_preserves_server_confirmation(
     with httpx.Client(
         base_url="https://example.test", transport=httpx.MockTransport(respond)
     ) as client:
-        run_client(client, "123", None)
+        run_client(client, "123", None, verbose=verbose)
     assert len(calls) == expected_posts
     output = capsys.readouterr().out
     assert "\x1b" not in output
     assert r"\x1b" in output
     assert "Confirm reruns for: owner/repo#123 @alice" in output
     assert "Type exactly" not in output
+    assert ("Excluded: Run 456: completed / success." in output) == verbose
 
 
 def test_cli_reports_request_id_after_lost_confirmation_response(monkeypatch, capsys):

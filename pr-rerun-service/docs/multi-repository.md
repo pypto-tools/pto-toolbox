@@ -336,11 +336,12 @@ remove it permanently; re-enabling the same identity otherwise retains the role.
 
 ## Query latency and progress (0.3.4)
 
-The client immediately reports when it is checking PR ownership, workflows and
-failed jobs, then prints elapsed time every five seconds while waiting. After
-confirmation it separately reports revalidation/submission and response time.
-These messages describe the outstanding request, not individual server substeps.
-Progress goes to stderr and stops before the confirmation prompt or on errors.
+The client immediately reports when it is checking the PR and workflows. Since
+client 0.3.6, an interactive terminal shows a single-line spinner with elapsed time;
+it clears before the preview or confirmation prompt. Confirmation uses the same
+spinner while revalidating and submitting. Redirected output and dumb terminals
+receive plain start/end messages without animation or repeated polling lines.
+Progress goes to stderr and describes the request, not individual server substeps.
 
 The server inspects independent runs with at most four concurrent readers per
 plan. Complete branch history is fetched once per source branch within that plan.
@@ -362,3 +363,11 @@ Uppercase `Y` and surrounding whitespace are accepted. No need to copy the full
 repository/PR identity. The client sends the original preview's confirmation and
 ticket only after this explicit approval, so server validation is unchanged.
 This is a client-only update and does not require a server restart.
+
+## Compact preview (client 0.3.6)
+
+Excluded runs are hidden by default. The preview shows the PR and proposed reruns;
+if none qualify, it reports that nothing will be submitted. To inspect why runs
+were skipped, use `pr-rerun 123 --verbose` (also works with `--repo`). This only
+changes client output: ownership checks, workflow selection and confirmation
+remain unchanged. Upgrade the client; no server restart is needed.

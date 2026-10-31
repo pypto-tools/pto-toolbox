@@ -6,6 +6,7 @@ import ipaddress
 import json
 import os
 import re
+import shutil
 import sys
 import threading
 import time
@@ -30,35 +31,53 @@ from pr_rerun.client_config import (
 # login works against deployed 0.1 servers without GitHub calls or mutations.
 LOGIN_PROBE = "/api/reruns/rr_" + "0" * 32
 AUTH_ERROR = "Service login is expired or revoked. Run 'pr-rerun login' again."
-PROGRESS_INTERVAL = 5
+PROGRESS_INTERVAL = 0.1
 
 
 @contextmanager
 def progress(message: str):
-    """Show elapsed waiting time, without claiming unreported server substeps."""
+    """Animate one terminal line; redirected output gets no animation or polling."""
     started = time.monotonic()
     stopped = threading.Event()
-    print(f"{message}...", file=sys.stderr, flush=True)
+    output = sys.stderr
+    animated = output.isatty() and os.environ.get("TERM") != "dumb"
+    frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+    try:
+        frames.encode(output.encoding or "ascii")
+    except (UnicodeEncodeError, LookupError):
+        frames = "|/-\\"
+
+    def render(index: int):
+        width = max(1, shutil.get_terminal_size().columns - 1)
+        line = f"{frames[index % len(frames)]} {message} ({time.monotonic() - started:.0f}s)"
+        print("\r\033[2K" + line[:width], end="", file=output, flush=True)
+
+    if animated:
+        render(0)
+    else:
+        print(f"{message}...", file=output, flush=True)
 
     def report():
+        index = 1
         while not stopped.wait(PROGRESS_INTERVAL):
-            print(
-                f"{message}... {time.monotonic() - started:.0f}s elapsed",
-                file=sys.stderr,
-                flush=True,
-            )
+            render(index)
+            index += 1
 
     reporter = threading.Thread(target=report, name="pr-rerun-progress", daemon=True)
-    reporter.start()
+    if animated:
+        reporter.start()
     completed = False
     try:
         yield
         completed = True
     finally:
         stopped.set()
-        reporter.join()
-        outcome = "Response received" if completed else "Waiting stopped"
-        print(f"{outcome} after {time.monotonic() - started:.1f}s.", file=sys.stderr, flush=True)
+        if animated:
+            reporter.join()
+            print("\r\033[2K", end="", file=output, flush=True)
+        else:
+            outcome = "Response received" if completed else "Waiting stopped"
+            print(f"{outcome} after {time.monotonic() - started:.1f}s.", file=output, flush=True)
 
 
 def safe_text(value: object) -> str:
@@ -320,7 +339,12 @@ def github_login(server: str, netbird: bool, repository: str | None) -> None:
 
 
 def run_client(
-    client: httpx.Client, target: str, request_id: str | None, repository: str | None = None
+    client: httpx.Client,
+    target: str,
+    request_id: str | None,
+    repository: str | None = None,
+    *,
+    verbose: bool = False,
 ) -> int:
     if target == "status":
         if not request_id or not re.fullmatch(r"rr_[0-9a-f]{32}", request_id):
@@ -333,7 +357,7 @@ def run_client(
     payload: dict = {"pr": int(target)}
     if repository is not None:
         payload["repository"] = repository
-    with progress("Checking PR ownership, workflows and failed jobs"):
+    with progress("Checking PR and workflows"):
         preview = request(client, "POST", "/api/reruns/preview", payload)
     pr = preview["pr"]
     print(f"Repository: {safe_text(preview['repository'])}")
@@ -342,10 +366,13 @@ def run_client(
     print(f"Head: {safe_text(pr['head_sha'])}")
     print(f"Base: {safe_text(pr['base_ref'])}")
     print(safe_text(pr["url"]))
-    for reason in preview.get("skipped", []):
-        print(f"Excluded: {safe_text(reason)}")
+    if verbose:
+        for reason in preview.get("skipped", []):
+            print(f"Excluded: {safe_text(reason)}")
     if not preview["eligible"]:
         print("No verified failed runs are eligible. No rerun was requested.")
+        if preview.get("skipped") and not verbose:
+            print("Use --verbose to see excluded runs.")
         return 2
     print("Proposed reruns:")
     for run in preview["runs"]:
@@ -360,7 +387,7 @@ def run_client(
         print("Cancelled. No rerun was requested.")
         return 1
     try:
-        with progress("Rechecking PR state and submitting confirmed reruns"):
+        with progress("Rechecking and submitting reruns"):
             result = request(
                 client,
                 "POST",
@@ -385,6 +412,7 @@ def main() -> None:
         "target", help="PR number, 'login', 'logout', 'status', 'policy', or 'alias'"
     )
     parser.add_argument("request_id", nargs="?")
+    parser.add_argument("--verbose", action="store_true", help="Show excluded runs in the preview")
     endpoint = parser.add_mutually_exclusive_group()
     endpoint.add_argument(
         "--server", help="HTTPS server, or PR_RERUN_URL (default: saved login, then loopback)"
@@ -480,7 +508,9 @@ def main() -> None:
                 print(json.dumps(value, indent=2))
                 code = 0
             else:
-                code = run_client(client, args.target, args.request_id, repository)
+                code = run_client(
+                    client, args.target, args.request_id, repository, verbose=args.verbose
+                )
     except (ValueError, OSError, httpx.HTTPError) as error:
         print(f"Error: {safe_text(error)}", file=sys.stderr)
         code = 2

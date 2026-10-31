@@ -84,20 +84,28 @@ def test_progress_starts_before_work_and_reports_while_waiting(monkeypatch):
     messages = []
 
     class Output:
+        encoding = "utf-8"
+
+        def isatty(self):
+            return True
+
         def write(self, message):
             messages.append(message)
-            if "elapsed" in message:
+            if "⠙" in message:
                 reported.set()
 
         def flush(self):
             pass
 
     monkeypatch.setattr("pr_rerun.cli.sys.stderr", Output())
+    monkeypatch.setenv("TERM", "xterm")
     monkeypatch.setattr("pr_rerun.cli.PROGRESS_INTERVAL", 0.01)
     with progress("Checking PR"):
-        assert "Checking PR..." in "".join(messages)
+        assert "⠋ Checking PR (" in "".join(messages)
         assert reported.wait(5)
-    assert "Response received after" in "".join(messages)
+    output = "".join(messages)
+    assert "\n" not in output
+    assert output.endswith("\r\033[2K")
     assert not any(t.name == "pr-rerun-progress" for t in threading.enumerate())
 
 
@@ -106,4 +114,40 @@ def test_progress_stops_on_interruption_without_claiming_success(capsys):
         raise KeyboardInterrupt
     output = capsys.readouterr().err
     assert "Waiting stopped" in output and "Response received" not in output
+    assert not any(t.name == "pr-rerun-progress" for t in threading.enumerate())
+
+
+@pytest.mark.parametrize("tty,term", [(False, "xterm"), (True, "dumb")])
+def test_progress_without_terminal_animation_is_plain_and_does_not_poll(monkeypatch, tty, term):
+    import io
+
+    output = io.StringIO()
+    monkeypatch.setattr(output, "isatty", lambda: tty)
+    monkeypatch.setattr("pr_rerun.cli.sys.stderr", output)
+    monkeypatch.setenv("TERM", term)
+    with progress("Checking PR"):
+        assert not any(t.name == "pr-rerun-progress" for t in threading.enumerate())
+    assert output.getvalue().count("\n") == 2
+    assert "\r" not in output.getvalue() and "\033" not in output.getvalue()
+
+
+def test_spinner_clears_on_interrupt_and_fits_narrow_ascii_terminal(monkeypatch):
+    import io
+    import os
+
+    class Terminal(io.StringIO):
+        encoding = "ascii"
+
+        def isatty(self):
+            return True
+
+    output = Terminal()
+    monkeypatch.setattr("pr_rerun.cli.sys.stderr", output)
+    monkeypatch.setattr("pr_rerun.cli.shutil.get_terminal_size", lambda: os.terminal_size((20, 24)))
+    monkeypatch.setenv("TERM", "xterm")
+    with pytest.raises(KeyboardInterrupt), progress("Checking a very long description"):
+        raise KeyboardInterrupt
+    text = output.getvalue()
+    assert text.startswith("\r\033[2K| ") and text.endswith("\r\033[2K")
+    assert all(len(frame) <= 19 for frame in text.split("\r\033[2K"))
     assert not any(t.name == "pr-rerun-progress" for t in threading.enumerate())
