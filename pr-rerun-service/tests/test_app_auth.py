@@ -211,6 +211,22 @@ def test_revocation_between_read_and_write_prevents_rerun(installation, monkeypa
         github.close()
 
 
+def test_parallel_metadata_reads_share_initial_auth_and_refresh(installation, monkeypatch):
+    auth, state = installation
+    monkeypatch.setattr(GitHub, "_request", lambda *args, **kwargs: httpx.Response(200, json={}))
+    github = auth.github("team/project", 44, 55)
+    try:
+        for batch in range(2):
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                assert list(pool.map(github.pull, range(1, 5))) == [{}] * 4
+            installs = [r for r in state["calls"] if r.url.path.endswith("/installation")]
+            assert len(installs) == batch + 1
+            assert state["tokens"] == batch + 1
+            auth.tokens[("team/project", 55)] = ("expired", time.time() + 10)
+    finally:
+        github.close()
+
+
 def test_enrollment_checks_active_workflow_paths(installation):
     auth, _ = installation
     auth.validate_workflows("team/project", 44, 55, [WorkflowRule(path=".github/workflows/ci.yml")])

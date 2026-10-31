@@ -7,7 +7,9 @@ import json
 import os
 import re
 import sys
+import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -28,6 +30,35 @@ from pr_rerun.client_config import (
 # login works against deployed 0.1 servers without GitHub calls or mutations.
 LOGIN_PROBE = "/api/reruns/rr_" + "0" * 32
 AUTH_ERROR = "Service login is expired or revoked. Run 'pr-rerun login' again."
+PROGRESS_INTERVAL = 5
+
+
+@contextmanager
+def progress(message: str):
+    """Show elapsed waiting time, without claiming unreported server substeps."""
+    started = time.monotonic()
+    stopped = threading.Event()
+    print(f"{message}...", file=sys.stderr, flush=True)
+
+    def report():
+        while not stopped.wait(PROGRESS_INTERVAL):
+            print(
+                f"{message}... {time.monotonic() - started:.0f}s elapsed",
+                file=sys.stderr,
+                flush=True,
+            )
+
+    reporter = threading.Thread(target=report, name="pr-rerun-progress", daemon=True)
+    reporter.start()
+    completed = False
+    try:
+        yield
+        completed = True
+    finally:
+        stopped.set()
+        reporter.join()
+        outcome = "Response received" if completed else "Waiting stopped"
+        print(f"{outcome} after {time.monotonic() - started:.1f}s.", file=sys.stderr, flush=True)
 
 
 def safe_text(value: object) -> str:
@@ -302,7 +333,8 @@ def run_client(
     payload: dict = {"pr": int(target)}
     if repository is not None:
         payload["repository"] = repository
-    preview = request(client, "POST", "/api/reruns/preview", payload)
+    with progress("Checking PR ownership, workflows and failed jobs"):
+        preview = request(client, "POST", "/api/reruns/preview", payload)
     pr = preview["pr"]
     print(f"Repository: {safe_text(preview['repository'])}")
     print(f"PR #{pr['number']}: {safe_text(pr['title'])}")
@@ -328,15 +360,16 @@ def run_client(
         print("Confirmation did not match. No rerun was requested.")
         return 1
     try:
-        result = request(
-            client,
-            "POST",
-            "/api/reruns/confirm",
-            {
-                "ticket": preview["ticket"],
-                "confirmation": answer,
-            },
-        )
+        with progress("Rechecking PR state and submitting confirmed reruns"):
+            result = request(
+                client,
+                "POST",
+                "/api/reruns/confirm",
+                {
+                    "ticket": preview["ticket"],
+                    "confirmation": answer,
+                },
+            )
     except (httpx.HTTPError, ValueError):
         print("Confirmation response was unavailable. Do not blindly submit another rerun.")
         print(f"Inspect: pr-rerun status {safe_text(request_id)}")

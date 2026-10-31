@@ -165,18 +165,21 @@ class AppAuth:
 
     def github(self, name: str, repository_id: int, installation_id: int) -> GitHub:
         provider = self
+        refresh_lock = threading.Lock()
 
         class InstallationGitHub(GitHub):
             def _request(self, method, path, *, payload=None, write=False):
                 # Fresh installation/repository authorization even with a cached token.
-                cached = provider.tokens.get((name, installation_id))
-                if (
-                    write
-                    or self._token == "installation-managed"
-                    or cached is None
-                    or cached[1] <= time.time() + 60
-                ):
-                    self._token = provider.credentials(name, repository_id, installation_id)[0]
+                # Serialize refreshes, but let independent metadata reads overlap.
+                with refresh_lock:
+                    cached = provider.tokens.get((name, installation_id))
+                    if (
+                        write
+                        or self._token == "installation-managed"
+                        or cached is None
+                        or cached[1] <= time.time() + 60
+                    ):
+                        self._token = provider.credentials(name, repository_id, installation_id)[0]
                 return super()._request(method, path, payload=payload, write=write)
 
         return InstallationGitHub(name, "installation-managed")

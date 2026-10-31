@@ -216,3 +216,23 @@ Service administrators can discover enabled repositories' aliases; rerun access,
 PR authorship and explicit confirmation still follow each repository's rules.
 Revoking service access also blocks administrators. Explicitly revoke the role to
 remove it permanently; re-enabling the same identity otherwise retains the role.
+
+## Query latency and progress (0.3.4)
+
+The client immediately reports when it is checking PR ownership, workflows and
+failed jobs, then prints elapsed time every five seconds while waiting. After
+confirmation it separately reports revalidation/submission and response time.
+These messages describe the outstanding request, not individual server substeps.
+Progress goes to stderr and stops before the confirmation prompt or on errors.
+
+The server inspects independent runs with at most four concurrent readers per
+plan. Complete branch history is fetched once per source branch within that plan.
+No identity result is shared between preview, confirmation and the final per-run
+check. Run selection and exclusions keep their original ordering; a failed lookup
+rejects the entire plan. Rerun writes remain sequential and are never retried
+implicitly. The service logs plan lookup duration and run counts without credentials.
+
+Upgrade clients for progress output, and the server for concurrent lookups. Exact
+confirmation remains required whenever eligible runs are found; no eligible runs
+means no confirmation and no rerun. GitHub/network latency still affects response
+time, and an accepted submission does not wait for CI completion.

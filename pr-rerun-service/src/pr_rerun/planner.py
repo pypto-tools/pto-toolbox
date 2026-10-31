@@ -1,6 +1,10 @@
 """Build plans from current PR checks and independently verifiable run identities."""
 
+import logging
+import threading
+import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from fnmatch import fnmatchcase
 
@@ -21,6 +25,8 @@ FAILURES = {"failure", "timed_out"}
 # A cancelled workflow can still contain failed jobs. Job conclusions, checked
 # below, decide eligibility; cancellation by itself is never enough.
 RERUN_CONCLUSIONS = FAILURES | {"cancelled"}
+LOOKUP_WORKERS = 4
+LOG = logging.getLogger("pr_rerun.performance")
 
 
 class Planner:
@@ -75,7 +81,14 @@ class Planner:
             url=f"https://github.com/{self.settings.repository}/pull/{number}",
         )
 
-    def matches(self, run: dict, pr: PullRequest, rule: WorkflowRule) -> bool:
+    def matches(
+        self,
+        run: dict,
+        pr: PullRequest,
+        rule: WorkflowRule,
+        *,
+        branch_lookup: Callable[[str], list[dict]] | None = None,
+    ) -> bool:
         if (
             run["repository"]["id"] != pr.repository_id
             or run["repository"]["full_name"].lower() != self.settings.repository.lower()
@@ -125,7 +138,7 @@ class Planner:
         # history. Reused branches and multiple target branches remain ambiguous.
         candidates = [
             candidate
-            for candidate in self.github.head_pull_requests(pr.head_ref)
+            for candidate in (branch_lookup or self.github.head_pull_requests)(pr.head_ref)
             if candidate["headRepository"] is not None
             and candidate["headRepository"]["databaseId"] == pr.head_repository_id
         ]
@@ -150,25 +163,49 @@ class Planner:
         return pr_created <= run_created
 
     def build(self, principal: Principal, number: int) -> Plan:
+        started = time.monotonic()
         pr = self.pull(principal, number)
         latest: dict[str, dict] = {}
         skipped = []
-        for run_id in self.github.checked_runs(number, pr.head_sha):
+        # Only this build shares branch history. Confirmation and the final
+        # per-run check must obtain new evidence rather than reuse preview data.
+        branch_cache: dict[str, list[dict]] = {}
+        branch_lock = threading.Lock()
+
+        def branch_history(head: str) -> list[dict]:
+            with branch_lock:
+                if head not in branch_cache:
+                    branch_cache[head] = self.github.head_pull_requests(head)
+                return branch_cache[head]
+
+        def inspect(run_id: int) -> tuple[dict, str | None]:
             run = self.github.run(run_id)
             if positive_id(run["id"]) != run_id:
                 raise UpstreamError("GitHub returned a different workflow run.")
             path = run["path"].split("@", 1)[0]
             rule = self.rules.get(path)
             if rule is None:
-                skipped.append(f"Run {run_id}: workflow is not allowed.")
-                continue
-            if not self.matches(run, pr, rule):
-                skipped.append(f"Run {run_id}: PR ownership could not be verified.")
-                continue
-            # Choose the newest run BEFORE filtering by failure. An older failed
-            # run must not be resurrected after a new success or active run.
-            if path not in latest or run["run_number"] > latest[path]["run_number"]:
-                latest[path] = run
+                return run, f"Run {run_id}: workflow is not allowed."
+            if not self.matches(run, pr, rule, branch_lookup=branch_history):
+                return run, f"Run {run_id}: PR ownership could not be verified."
+            return run, None
+
+        run_ids = self.github.checked_runs(number, pr.head_sha)
+        executor = ThreadPoolExecutor(max_workers=LOOKUP_WORKERS)
+        try:
+            # map preserves input order, including deterministic exclusions and
+            # selection when GitHub responses complete in a different order.
+            for run, reason in executor.map(inspect, run_ids):
+                if reason is not None:
+                    skipped.append(reason)
+                    continue
+                path = run["path"].split("@", 1)[0]
+                # Choose the newest run BEFORE filtering by failure. An older failed
+                # run must not be resurrected after a new success or active run.
+                if path not in latest or run["run_number"] > latest[path]["run_number"]:
+                    latest[path] = run
+        finally:
+            executor.shutdown(wait=True, cancel_futures=True)
         cutoff = datetime.now(timezone.utc) - timedelta(days=30)
         selected = []
         for path, run in sorted(latest.items()):
@@ -204,6 +241,15 @@ class Planner:
             )
         if self.pull(principal, number) != pr:
             raise ServiceError(409, "PR changed during lookup; request another preview.")
+        LOG.info(
+            "Plan verified repository=%s pr=%d checked_runs=%d "
+            "eligible_runs=%d elapsed_seconds=%.2f",
+            self.settings.repository,
+            number,
+            len(run_ids),
+            len(selected),
+            time.monotonic() - started,
+        )
         return Plan(
             policy_revision=self.settings.policy_revision,
             repository=self.settings.repository,
