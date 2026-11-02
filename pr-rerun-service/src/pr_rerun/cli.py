@@ -641,6 +641,10 @@ def show_stats(args) -> int:
 
 
 def main() -> None:
+    if len(sys.argv) > 1 and sys.argv[1] == "mcp":
+        from pr_rerun.mcp_stdio import main as mcp_main
+
+        raise SystemExit(mcp_main(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "alias":
         raise SystemExit(aliases.main(sys.argv[2:], official_alias_command))
     parser = argparse.ArgumentParser(description="Preview and confirm reruns for your own PRs")
@@ -649,7 +653,7 @@ def main() -> None:
     parser.add_argument("--version", action="version", version=f"pr-rerun {VERSION}")
     parser.add_argument(
         "target",
-        help="PR number, login, logout, status, policy, alias, repos, stats, errors, or error",
+        help="PR number, login, logout, status, policy, alias, repos, stats, errors, error, or mcp",
     )
     parser.add_argument("request_id", nargs="?")
     parser.add_argument("--verbose", action="store_true", help="Show excluded runs in the preview")

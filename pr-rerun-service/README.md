@@ -6,7 +6,7 @@ An administrator runs one server; users log in through GitHub once, then use
 
 English | [中文](README.zh-CN.md)
 
-Current version: **0.6.0**. Use GitHub App mode for per-repository authorization
+Current version: **0.7.0**. Use GitHub App mode for per-repository authorization
 and policies without manually distributing tokens. Legacy single-repository
 `gh`/token deployments remain supported.
 
@@ -107,6 +107,13 @@ Login saves the origin and token in `~/.config/pr-rerun/client.json` (or under
 without creating a rerun. A saved token is only reused for its original server.
 One OS account stores one login; contributors sharing an OS account share that login.
 
+
+## AI analysis over MCP (0.7.0)
+
+The client includes a read-only MCP adapter using your saved login. Configure your
+AI host to launch `pr-rerun mcp --repo pypto` via stdio; it can query repositories,
+CI statistics and error excerpts. Existing 0.6.0 servers need no update.
+See [MCP setup and permission boundaries](docs/mcp.md).
 
 ## CI error excerpts (0.6.0)
 

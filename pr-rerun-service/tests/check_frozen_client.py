@@ -151,6 +151,7 @@ def main():
                 ["error", ERROR["id"], "--json"],
                 ["alias", "set", "demo", "example/project"],
                 ["alias", "list"],
+                ["mcp", "--repo", "demo"],
                 ["logout"],
             ]
             for args in commands:
@@ -161,6 +162,47 @@ def main():
                     timeout=30,
                     capture_output=True,
                     text=True,
+                    input=(
+                        "\n".join(
+                            json.dumps(frame)
+                            for frame in [
+                                {
+                                    "jsonrpc": "2.0",
+                                    "id": 1,
+                                    "method": "initialize",
+                                    "params": {
+                                        "protocolVersion": "2025-11-25",
+                                        "capabilities": {},
+                                        "clientInfo": {"name": "release-test", "version": "1"},
+                                    },
+                                },
+                                {"jsonrpc": "2.0", "method": "notifications/initialized"},
+                                {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+                                *[
+                                    {
+                                        "jsonrpc": "2.0",
+                                        "id": index + 3,
+                                        "method": "tools/call",
+                                        "params": {
+                                            "name": name,
+                                            "arguments": arguments,
+                                        },
+                                    }
+                                    for index, (name, arguments) in enumerate(
+                                        [
+                                            ("list_repositories", {}),
+                                            ("get_ci_stats", {}),
+                                            ("list_ci_errors", {}),
+                                            ("get_ci_error", {"error_id": ERROR["id"]}),
+                                        ]
+                                    )
+                                ],
+                            ]
+                        )
+                        + "\n"
+                        if args[0] == "mcp"
+                        else None
+                    ),
                 )
                 print(completed.stdout, end="")
                 if args == ["stats"]:
@@ -172,6 +214,13 @@ def main():
                         assert json.loads(completed.stdout)["repository"] == "example/project"
                 elif args == ["stats", "--json"]:
                     assert json.loads(completed.stdout)["jobs"][0]["failure_rate"] == 0.375
+                elif args[0] == "mcp":
+                    replies = [json.loads(line) for line in completed.stdout.splitlines()]
+                    assert len(replies) == 6
+                    assert len(replies[1]["result"]["tools"]) == 4
+                    assert all(not reply["result"]["isError"] for reply in replies[2:])
+                    assert replies[-1]["result"]["structuredContent"]["error"]["id"] == ERROR["id"]
+                    assert TOKEN not in completed.stdout and not completed.stderr
             assert not (Path(temporary) / "pr-rerun/client.json").exists()
     finally:
         server.shutdown()
