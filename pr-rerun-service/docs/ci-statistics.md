@@ -135,3 +135,12 @@ need an upgrade. No new client login is required unless the session expired/revo
 References: [runs and the search cap](https://docs.github.com/en/rest/actions/workflow-runs#list-workflow-runs-for-a-repository),
 [job attempts](https://docs.github.com/en/rest/actions/workflow-jobs#list-jobs-for-a-workflow-run-attempt),
 [rate limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api).
+
+## Client display (0.5.1)
+
+Text output uses aligned columns and right-aligned numbers. Workflow path prefixes
+are abbreviated and long job names wrap to the terminal width without dropping
+matrix parameters. Narrow terminals use stacked fields. Failed steps appear below
+the table. JSON output is unchanged. A missing completed sync is described as
+partial collection rather than `Last sync: None`. Update only the client; server
+0.5.0 remains compatible, with no restart or new login required.

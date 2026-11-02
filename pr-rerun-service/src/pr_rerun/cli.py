@@ -457,6 +457,97 @@ def run_client(
     return show_result(result)
 
 
+def stats_table(result: dict) -> None:
+    """Render aligned columns, wrapping names without losing matrix parameters."""
+    import unicodedata
+
+    def width(text):
+        return sum(
+            0
+            if unicodedata.combining(char)
+            else 2
+            if unicodedata.east_asian_width(char) in {"W", "F"}
+            else 1
+            for char in text
+        )
+
+    def wrap(text, size):
+        lines, line, used = [], "", 0
+        for char in text:
+            length = width(char)
+            if line and used + length > size:
+                lines.append(line)
+                line, used = "", 0
+            line += char
+            used += length
+        return [*lines, line]
+
+    def label(row):
+        workflow = row["workflow"]
+        if workflow.startswith(".github/workflows/"):
+            workflow = workflow[len(".github/workflows/") :]
+        for suffix in (".yml", ".yaml"):
+            if workflow.endswith(suffix):
+                workflow = workflow[: -len(suffix)]
+                break
+        return safe_text(workflow) + " / " + safe_text(row["job"])
+
+    headers = ["JOB", "SAMPLES", "FAILED", "TIMEOUT", "RATE", "RECOVERED"]
+    rows = [
+        [
+            label(row),
+            str(row["samples"]),
+            str(row["failures"]),
+            str(row["timeouts"]),
+            "-" if row["failure_rate"] is None else f"{row['failure_rate']:.1%}",
+            f"{row['recovered']}/{row['retried_failures']}",
+        ]
+        for row in result["jobs"]
+    ]
+    widths = [max(width(row[index]) for row in [headers, *rows]) for index in range(6)]
+    terminal = max(20, shutil.get_terminal_size(fallback=(100, 24)).columns - 1)
+    remaining = terminal - sum(widths[1:]) - 10
+    print()
+    if remaining < 12:
+        # A narrow terminal cannot hold the numeric columns next to a job name.
+        for row in rows:
+            print("\n".join(wrap(row[0], terminal)))
+            for title, value in zip(headers[1:], row[1:], strict=True):
+                print(f"  {title}: {value}")
+            print()
+    else:
+        widths[0] = min(max(12, widths[0]), remaining)
+
+        def line(values):
+            fields = []
+            for index, (value, size) in enumerate(zip(values, widths, strict=True)):
+                padding = " " * (size - width(value))
+                fields.append(value + padding if index == 0 else padding + value)
+            return "  ".join(fields).rstrip()
+
+        print(line(headers))
+        print(line(["-" * size for size in widths]))
+        for row in rows:
+            chunks = wrap(row[0], widths[0])
+            print(line([chunks[0], *row[1:]]))
+            for chunk in chunks[1:]:
+                print(chunk)
+    print("Recovered = recovered / retried initial failures.")
+    print(f"Showing {len(rows)} of {result['total_groups']} job groups.")
+    details = [row for row in result["jobs"] if row["failed_steps"]]
+    if details:
+        print("\nFailed steps (first attempts):")
+        for row in details:
+            print("\n".join(wrap(label(row), terminal)))
+            for step, count in list(row["failed_steps"].items())[:3]:
+                print(
+                    "\n".join(
+                        "  " + part
+                        for part in wrap(f"Failed step: {safe_text(step)} ({count})", terminal - 2)
+                    )
+                )
+
+
 def show_stats(args) -> int:
     from contextlib import redirect_stdout
     from urllib.parse import urlencode
@@ -500,24 +591,22 @@ def show_stats(args) -> int:
     else:
         print(f"Repository: {safe_text(result['repository'])}")
         print(f"Window: {safe_text(result['since'])} to {safe_text(result['until'])}")
-        print(
-            f"Last sync: {safe_text(str(result['last_sync']))}; "
-            f"complete={result['complete']}; stale={result['stale']}"
-        )
-        print("First attempts only. Failure rate = (failures + timeouts) / terminal samples.")
-        print("WORKFLOW / JOB | SAMPLES | FAILED | TIMEOUT | RATE | RECOVERED/RETRIED")
-        for row in result["jobs"]:
-            rate = "-" if row["failure_rate"] is None else f"{row['failure_rate']:.1%}"
-            print(
-                f"{safe_text(row['workflow'])} / {safe_text(row['job'])} | {row['samples']} | "
-                f"{row['failures']} | {row['timeouts']} | {rate} | "
-                f"{row['recovered']}/{row['retried_failures']}"
-            )
-            for step, count in list(row["failed_steps"].items())[:3]:
-                print(f"  Failed step: {safe_text(step)} ({count})")
-        print(f"Showing {len(result['jobs'])} of {result['total_groups']} job groups.")
+        last_sync = result["last_sync"]
+        if last_sync is None:
+            print("Collection: no completed sync yet; showing partial results.")
+        else:
+            print(f"Last sync: {safe_text(last_sync)}")
+            status = "complete" if result["complete"] else "incomplete"
+            if result["stale"]:
+                status += ", stale"
+            print(f"Data: {status}")
+        print("First attempts only; failure rate includes failures and timeouts.")
+        stats_table(result)
         if not result["complete"] or result["stale"]:
-            print("Warning: incomplete or stale data; ask the operator to run ci-sync.")
+            if last_sync is None and not result["stale"]:
+                print("\nPartial data: collection has not finished; check again shortly.")
+            else:
+                print("\nIncomplete or stale data: check the collection timer or run ci-sync.")
     return 0 if result["complete"] and not result["stale"] else 1
 
 

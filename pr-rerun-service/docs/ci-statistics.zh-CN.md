@@ -108,3 +108,10 @@ API 为 `GET /api/repositories/{owner}/{repo}/stats`，接受相同查询参数�
 参考：[运行查询与上限](https://docs.github.com/en/rest/actions/workflow-runs#list-workflow-runs-for-a-repository)、
 [按 attempt 查询 job](https://docs.github.com/en/rest/actions/workflow-jobs#list-jobs-for-a-workflow-run-attempt)、
 [API 限流](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)。
+
+## 客户端显示（0.5.1）
+
+文本输出按列宽对齐，数值右对齐；省略 workflow 路径前缀，长 job 名称按终端宽度换行，
+不截掉 matrix 参数。窄终端使用逐项布局。失败步骤集中在表格下方，JSON 格式不变。
+尚无已完成采集时显示部分结果提示，不再显示 `Last sync: None`。只需更新客户端，
+服务端 0.5.0 可以继续使用，不需要重启或重新登录。
