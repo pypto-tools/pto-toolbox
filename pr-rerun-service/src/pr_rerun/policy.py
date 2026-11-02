@@ -27,6 +27,8 @@ class RepositoryPolicy(StrictModel):
     users: list[UserID] = Field(default_factory=list, max_length=1000)
     access: Literal["explicit_users", "authenticated_users"] = "explicit_users"
     aliases: list[AliasName] = Field(default_factory=list, max_length=20)
+    analytics_enabled: bool = False
+    analytics_access: Literal["maintainers", "repository_users"] = "maintainers"
     allow_drafts: bool = False
     base_branches: list[str] = Field(default_factory=lambda: ["main"], min_length=1, max_length=100)
     workflows: list[WorkflowRule] = Field(min_length=1, max_length=100)
@@ -177,6 +179,14 @@ class PolicyStore:
             raise ServiceError(403, "You are not authorized for this repository.")
         if not manage and not policy.enabled:
             raise ServiceError(403, "Repository reruns are disabled.")
+
+    def authorize_analytics(self, record: dict, principal: Principal) -> None:
+        policy = record["policy"]
+        if not policy.enabled or not policy.analytics_enabled:
+            raise ServiceError(403, "CI statistics are disabled for this repository.")
+        if self.store.is_service_admin(principal.github_id):
+            return
+        self.authorize(record, principal, manage=policy.analytics_access == "maintainers")
 
     def enroll(self, name: str, repository_id: int, installation_id: int, policy: RepositoryPolicy):
         name = repository_name(name)

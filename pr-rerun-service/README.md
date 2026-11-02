@@ -6,7 +6,7 @@ An administrator runs one server; users log in through GitHub once, then use
 
 English | [中文](README.zh-CN.md)
 
-Current version: **0.4.1**. Use GitHub App mode for per-repository authorization
+Current version: **0.5.0**. Use GitHub App mode for per-repository authorization
 and policies without manually distributing tokens. Legacy single-repository
 `gh`/token deployments remain supported.
 
@@ -107,6 +107,25 @@ Login saves the origin and token in `~/.config/pr-rerun/client.json` (or under
 without creating a rerun. A saved token is only reused for its original server.
 One OS account stores one login; contributors sharing an OS account share that login.
 
+
+## CI statistics (0.5.0)
+
+After a maintainer enables analytics and the operator collects data, use your
+existing login:
+
+```bash
+pr-rerun stats --repo pypto --days 7
+pr-rerun stats --repo pypto --days 30 --sort failure-rate
+pr-rerun stats --repo pypto --json
+```
+
+Reports show first-attempt failures, rates, failed steps and rerun recoveries,
+with event, head branch, workflow path and exact job filters. Queries never rerun
+jobs; cancelled/skipped jobs do not enter the failure-rate denominator.
+Upgrade both server and client and configure the separate collection timer.
+No new login or App permission is required. Analytics are disabled by default;
+viewing defaults to administrators and can be opened to repository users.
+See [configuration, collection and metric definitions](docs/ci-statistics.md).
 
 ## Repository inventory (0.4.1)
 

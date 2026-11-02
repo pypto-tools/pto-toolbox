@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import sqlite3
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -68,6 +69,11 @@ def main() -> None:
     enroll = commands.add_parser("repo-add", help="Enroll an explicitly installed repository")
     enroll.add_argument("repository", type=repository_name)
     enroll.add_argument("--policy-file", type=Path, required=True)
+    collector = commands.add_parser("ci-sync", help="Collect read-only CI statistics")
+    collector.add_argument("--repo", required=True, type=repository_name)
+    collector.add_argument("--days", type=int, choices=range(1, 31), default=7)
+    collector.add_argument("--request-budget", type=int, default=1500)
+    collector.add_argument("--json", action="store_true", help="Output collection status as JSON")
     revoke = commands.add_parser("revoke", help="Revoke a user's token by immutable GitHub user ID")
     revoke.add_argument("github_id", type=int)
     commands.add_parser("users", help="List identities without token hashes or credentials")
@@ -89,6 +95,30 @@ def main() -> None:
         database = os.environ.get("PR_RERUN_DATABASE")
         if not database:
             raise ValueError("PR_RERUN_DATABASE is required")
+        if args.command == "ci-sync":
+            from pr_rerun.stats_collect import collect
+
+            if not 1 <= args.request_budget <= 5000:
+                raise ValueError("Request budget must be between 1 and 5000")
+            result = collect(
+                Settings.from_env(github_auth="app"),
+                args.repo,
+                days=args.days,
+                budget=args.request_budget,
+            )
+            if args.json:
+                print(json.dumps(result, indent=2))
+            else:
+                print(f"CI statistics: {args.repo}")
+                print(
+                    f"Complete: {result['complete']}; runs seen: {result['runs_seen']}; "
+                    f"runs fetched: {result['runs_fetched']}; requests: {result['requests']}"
+                )
+                for error in result["errors"]:
+                    print("Warning: " + safe_text(error))
+            if not result["complete"]:
+                parser.exit(1, "Statistics sync is incomplete; cached progress is retained.\n")
+            return
         if args.command == "installations":
             records = read_enrollments(Path(database))
             settings = Settings.from_env(github_auth="app")
@@ -168,6 +198,8 @@ def main() -> None:
                     indent=2,
                 )
             )
+    except sqlite3.Error:
+        parser.exit(2, "Error: Cannot access the configured statistics or service database.\n")
     except ValidationError:
         parser.exit(2, "Error: Invalid configuration or repository policy.\n")
     except (ValueError, OSError, ServiceError, KeyError) as error:

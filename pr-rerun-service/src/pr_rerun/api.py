@@ -6,10 +6,10 @@ import logging
 import os
 import sqlite3
 from contextlib import asynccontextmanager
-from typing import Annotated
+from typing import Annotated, Literal
 
 import uvicorn
-from fastapi import Depends, FastAPI, Header, Request
+from fastapi import Depends, FastAPI, Header, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import Field
@@ -243,6 +243,43 @@ def create_app(
     @app.get("/api/repository-aliases/{alias}")
     def resolve_alias(alias: str, actor: Annotated[Principal, Depends(principal)]):
         return {"repository": registry().policies.resolve_alias(alias, actor)}
+
+    @app.get("/api/repositories/{owner}/{repo}/stats")
+    def statistics(
+        owner: str,
+        repo: str,
+        actor: Annotated[Principal, Depends(principal)],
+        days: Annotated[int, Query(ge=1, le=30)] = 7,
+        sort: Literal["failures", "failure-rate"] = "failures",
+        event: Annotated[str | None, Query(max_length=100)] = None,
+        branch: Annotated[str | None, Query(max_length=255)] = None,
+        workflow: Annotated[str | None, Query(max_length=300)] = None,
+        job: Annotated[str | None, Query(max_length=500)] = None,
+        limit: Annotated[int, Query(ge=1, le=200)] = 20,
+    ):
+        from pr_rerun.stats import report, stats_path
+
+        current = registry()
+        record = current.policies.get(f"{owner}/{repo}")
+        current.policies.authorize_analytics(record, actor)
+        # Fail closed on installation revocation even for cached private metadata.
+        current.auth.read_credentials(
+            record["name"], record["repository_id"], record["installation_id"]
+        )
+        result = report(
+            stats_path(settings.database, settings.stats_database),
+            record,
+            days=days,
+            sort=sort,
+            event=event,
+            branch=branch,
+            workflow=workflow,
+            job=job,
+            limit=limit,
+        )
+        store.authenticate_hash(actor.token_hash)
+        current.policies.authorize_analytics(current.policies.get(record["name"]), actor)
+        return result
 
     @app.get("/api/repositories/{owner}/{repo}/policy")
     def policy(owner: str, repo: str, actor: Annotated[Principal, Depends(principal)]):

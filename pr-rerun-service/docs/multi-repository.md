@@ -100,7 +100,7 @@ References: [registration](https://docs.github.com/en/apps/creating-github-apps/
 
 ## Bootstrap a repository
 
-Install the current version (0.4.1) in an isolated server environment following
+Install the current version (0.5.0) in an isolated server environment following
 the main README. Set the following in the service's private environment; use an
 absolute key path:
 
@@ -210,7 +210,7 @@ management: only the configured maintainers can update policy.
 
 ## Contributor and maintainer commands
 
-Use the current 0.4.1 client; existing login files still load. Repository listing
+Use the current 0.5.0 client; existing login files still load. Repository listing
 also requires an App-mode server at version 0.4.1.
 
 ```bash
@@ -438,3 +438,14 @@ without logging authorization codes, tokens, proxy credentials or response bodie
 Routine HTTP library request logs are suppressed to avoid signed artifact URLs
 appearing in the service journal. Existing clients can use this server update
 without reinstalling or clearing their saved login.
+
+## CI analytics policy
+
+Version 0.5.0 adds `analytics_enabled` (default `false`) and `analytics_access`
+(default `maintainers`, optionally `repository_users`) per repository. Statistics
+have separate storage and viewing authorization; author-only rerun permission does
+not automatically grant access to repository-wide metadata. See [CI statistics](ci-statistics.md).
+
+Back up the database before upgrading. Once policies contain these fields, older
+strict validators cannot read them. Downgrading requires a compatible migration
+or the matching database backup; do not simply switch code back to 0.4.1.

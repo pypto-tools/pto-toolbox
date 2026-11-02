@@ -18,10 +18,10 @@
 
 ```bash
 curl --fail --location --proto '=https' --proto-redir '=https' \
-  https://github.com/pypto-tools/pto-toolbox/releases/download/pr-rerun-v0.4.1/install-client.py \
+  https://github.com/pypto-tools/pto-toolbox/releases/download/pr-rerun-v0.5.0/install-client.py \
   -o install-client.py
 python3 install-client.py --dry-run
-sudo python3 install-client.py --version 0.4.1
+sudo python3 install-client.py --version 0.5.0
 pr-rerun --version
 ```
 
@@ -30,9 +30,9 @@ pr-rerun --version
 ```bash
 curl --fail --location --proto '=https' --proto-redir '=https' \
   --proxy http://127.0.0.1:7892 \
-  https://github.com/pypto-tools/pto-toolbox/releases/download/pr-rerun-v0.4.1/install-client.py \
+  https://github.com/pypto-tools/pto-toolbox/releases/download/pr-rerun-v0.5.0/install-client.py \
   -o install-client.py
-sudo python3 install-client.py --version 0.4.1 --proxy http://127.0.0.1:7892
+sudo python3 install-client.py --version 0.5.0 --proxy http://127.0.0.1:7892
 ```
 
 安装器自动选择架构，通过 HTTPS 下载 `SHA256SUMS` 和安装包，校验摘要、平台兼容性，
@@ -57,7 +57,7 @@ pr-rerun 123
 
 ```bash
 sudo pr-rerun-update                         # 最新已发布的客户端
-sudo pr-rerun-update --version 0.4.1         # 指定版本
+sudo pr-rerun-update --version 0.5.0         # 指定版本
 sudo pr-rerun-update --proxy http://127.0.0.1:7892
 sudo pr-rerun-update --rollback              # 上一个已安装的独立版本
 pr-rerun --version
@@ -116,7 +116,7 @@ pr-rerun repos
 ## 从旧共享 wheel 安装迁移
 
 ```bash
-sudo python3 install-client.py --version 0.4.1 --migrate-existing
+sudo python3 install-client.py --version 0.5.0 --migrate-existing
 ```
 
 这个选项只替换与 `deploy/pr-rerun-client` 完全一致的旧启动脚本，先备份到

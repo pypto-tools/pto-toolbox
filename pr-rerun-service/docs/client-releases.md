@@ -22,10 +22,10 @@ then execute it with root privileges:
 
 ```bash
 curl --fail --location --proto '=https' --proto-redir '=https' \
-  https://github.com/pypto-tools/pto-toolbox/releases/download/pr-rerun-v0.4.1/install-client.py \
+  https://github.com/pypto-tools/pto-toolbox/releases/download/pr-rerun-v0.5.0/install-client.py \
   -o install-client.py
 python3 install-client.py --dry-run
-sudo python3 install-client.py --version 0.4.1
+sudo python3 install-client.py --version 0.5.0
 pr-rerun --version
 ```
 
@@ -34,9 +34,9 @@ If your machine uses a local HTTP/mixed proxy, use it for **both** downloads:
 ```bash
 curl --fail --location --proto '=https' --proto-redir '=https' \
   --proxy http://127.0.0.1:7892 \
-  https://github.com/pypto-tools/pto-toolbox/releases/download/pr-rerun-v0.4.1/install-client.py \
+  https://github.com/pypto-tools/pto-toolbox/releases/download/pr-rerun-v0.5.0/install-client.py \
   -o install-client.py
-sudo python3 install-client.py --version 0.4.1 --proxy http://127.0.0.1:7892
+sudo python3 install-client.py --version 0.5.0 --proxy http://127.0.0.1:7892
 ```
 
 The installer selects the machine's architecture, downloads `SHA256SUMS` and the
@@ -63,7 +63,7 @@ Login state and local aliases remain in each user's `~/.config/pr-rerun` (or
 
 ```bash
 sudo pr-rerun-update                         # latest published client release
-sudo pr-rerun-update --version 0.4.1         # an exact version
+sudo pr-rerun-update --version 0.5.0         # an exact version
 sudo pr-rerun-update --proxy http://127.0.0.1:7892
 sudo pr-rerun-update --rollback              # previous installed standalone release
 pr-rerun --version
@@ -132,7 +132,7 @@ server; repeating the client update will not fix it.
 ## Migrate the old shared wheel installation
 
 ```bash
-sudo python3 install-client.py --version 0.4.1 --migrate-existing
+sudo python3 install-client.py --version 0.5.0 --migrate-existing
 ```
 
 This flag replaces only the exact known legacy wrapper from

@@ -32,6 +32,7 @@ class AppAuth:
         )
         self.lock = threading.Lock()
         self.tokens: dict[tuple[str, int], tuple[str, float]] = {}
+        self.read_tokens: dict[tuple[str, int, int], tuple[str, float]] = {}
 
     def close(self):
         self.client.close()
@@ -248,6 +249,56 @@ class AppAuth:
                 403, "Repository identity changed; administrator enrollment is required."
             )
         return cached[0], identity, current
+
+    def read_credentials(self, name: str, repository_id: int, installation_id: int):
+        """Separate Actions-read credentials for analytics; never reuse write tokens."""
+        name = repository_name(name)
+        positive_id(repository_id)
+        positive_id(installation_id)
+        jwt = self.jwt()
+        installation = self._json("GET", f"/repos/{name}/installation", jwt)
+        if (
+            installation.get("id") != installation_id
+            or installation.get("app_id") != self.app_id
+            or installation.get("suspended_at") is not None
+            or installation.get("repository_selection") != "selected"
+            or installation.get("permissions", {}).get("actions") not in {"read", "write"}
+        ):
+            raise ServiceError(403, "Current repository App authorization is required.")
+        key = (name, repository_id, installation_id)
+        with self.lock:
+            cached = self.read_tokens.get(key)
+            if cached is None or cached[1] <= time.time() + 60:
+                value = self._json(
+                    "POST",
+                    f"/app/installations/{installation_id}/access_tokens",
+                    jwt,
+                    {
+                        "repository_ids": [repository_id],
+                        "permissions": {"actions": "read", "metadata": "read"},
+                    },
+                )
+                permissions = value.get("permissions", {})
+                if permissions.get("actions") != "read" or any(
+                    mode not in {"read", "none"} for mode in permissions.values()
+                ):
+                    raise UpstreamError("Expected a read-only Actions token.")
+                expires = datetime.fromisoformat(value["expires_at"].replace("Z", "+00:00"))
+                token = value.get("token")
+                if (
+                    not isinstance(token, str)
+                    or not token
+                    or expires.tzinfo is None
+                    or expires.timestamp() <= time.time() + 60
+                ):
+                    raise UpstreamError("Invalid installation token response.")
+                cached = token, expires.timestamp()
+                self.read_tokens[key] = cached
+        repo = self._json("GET", f"/repos/{name}", cached[0])
+        if repo.get("id") != repository_id or repo.get("full_name", "").lower() != name:
+            self.read_tokens.pop(key, None)
+            raise ServiceError(403, "Repository identity changed; statistics access denied.")
+        return cached
 
     def validate_workflows(
         self, name: str, repository_id: int, installation_id: int, workflows

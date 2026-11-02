@@ -72,6 +72,7 @@ class Settings(StrictModel):
     preview_interval: int = Field(default=5, ge=0)
     confirm_interval: int = Field(default=60, ge=0)
     database: Path
+    stats_database: Path | None = None
     github_token: SecretStr = Field(repr=False)
 
     @model_validator(mode="after")
@@ -105,6 +106,11 @@ class Settings(StrictModel):
                 raise ValueError("Set PR_RERUN_APP_ID and PR_RERUN_APP_PRIVATE_KEY_FILE")
             return cls(
                 database=Path(database),
+                stats_database=(
+                    Path(os.environ["PR_RERUN_STATS_DATABASE"])
+                    if os.environ.get("PR_RERUN_STATS_DATABASE")
+                    else None
+                ),
                 github_token=SecretStr("installation-managed"),
                 app_id=app_id,
                 app_client_id=os.environ.get("PR_RERUN_APP_CLIENT_ID") or None,

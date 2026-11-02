@@ -32,6 +32,20 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(401, {"error": "Unauthenticated"})
         elif self.path == "/api/repositories":
             self.reply(200, {"scope": "visible", "github_checked": False, "repositories": []})
+        elif self.path.startswith("/api/repositories/example/project/stats?"):
+            self.reply(
+                200,
+                {
+                    "repository": "example/project",
+                    "since": "2026-10-01T00:00:00Z",
+                    "until": "2026-10-08T00:00:00Z",
+                    "last_sync": "2026-10-08T00:00:00Z",
+                    "complete": True,
+                    "stale": False,
+                    "jobs": [],
+                    "total_groups": 0,
+                },
+            )
         elif self.path == "/api/reruns/" + REQUEST:
             self.reply(200, {"request_id": REQUEST, "state": "accepted", "runs": []})
         else:
@@ -78,6 +92,8 @@ def main():
                 ["status", REQUEST],
                 ["repos"],
                 ["repos", "--json"],
+                ["stats"],
+                ["stats", "--json"],
                 ["alias", "set", "demo", "example/project"],
                 ["alias", "list"],
                 ["logout"],

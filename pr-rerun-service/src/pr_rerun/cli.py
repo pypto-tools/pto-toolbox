@@ -191,6 +191,12 @@ def request(client: httpx.Client, method: str, path: str, body: dict | None = No
         and (path == "/api/repository-aliases" or response.json().get("detail") == "Not Found")
     ):
         raise ValueError("Official aliases require an App-mode server version 0.3.2 or later")
+    if (
+        response.status_code == 404
+        and "/stats?" in path
+        and response.json().get("detail") == "Not Found"
+    ):
+        raise ValueError("CI statistics require an App-mode server version 0.5.0 or later")
     value = response.json()
     if not isinstance(value, dict):
         raise ValueError("Invalid service response")
@@ -451,6 +457,70 @@ def run_client(
     return show_result(result)
 
 
+def show_stats(args) -> int:
+    from contextlib import redirect_stdout
+    from urllib.parse import urlencode
+
+    if args.request_id is not None:
+        raise ValueError("Use stats --repo REPOSITORY without a PR or request ID")
+    days = args.days if args.days is not None else 7
+    limit = args.limit if args.limit is not None else 20
+    if not 1 <= days <= 30 or not 1 <= limit <= 200:
+        raise ValueError("Use --days 1..30 and --limit 1..200")
+    saved = load_login()
+    server, _ = configured_endpoint(args.server, args.netbird_server, saved)
+    if not has_credentials(server, saved):
+        raise ValueError("Run pr-rerun login before querying statistics")
+    repository = args.repo or os.environ.get("PR_RERUN_REPOSITORY")
+    if repository is None and saved is not None and httpx.URL(saved.server) == httpx.URL(server):
+        repository = saved.repository
+    if repository is None:
+        raise ValueError("Select a statistics repository with --repo")
+    with httpx.Client(
+        base_url=server,
+        headers={"Authorization": "Bearer " + selected_token(server, saved, login=False)},
+        timeout=60,
+        trust_env=False,
+        follow_redirects=False,
+    ) as client:
+        with redirect_stdout(sys.stderr):
+            repository = resolve_selection(client, repository)
+        params = {"days": days, "sort": args.sort or "failures", "limit": limit}
+        for name in ("event", "branch", "workflow", "job"):
+            if value := getattr(args, name):
+                params[name] = value
+        with progress("Checking CI statistics"):
+            result = request(
+                client, "GET", f"/api/repositories/{repository}/stats?{urlencode(params)}"
+            )
+    if not isinstance(result.get("jobs"), list) or type(result.get("complete")) is not bool:
+        raise ValueError("Invalid statistics response")
+    if args.json:
+        print(json.dumps(result, indent=2))
+    else:
+        print(f"Repository: {safe_text(result['repository'])}")
+        print(f"Window: {safe_text(result['since'])} to {safe_text(result['until'])}")
+        print(
+            f"Last sync: {safe_text(str(result['last_sync']))}; "
+            f"complete={result['complete']}; stale={result['stale']}"
+        )
+        print("First attempts only. Failure rate = (failures + timeouts) / terminal samples.")
+        print("WORKFLOW / JOB | SAMPLES | FAILED | TIMEOUT | RATE | RECOVERED/RETRIED")
+        for row in result["jobs"]:
+            rate = "-" if row["failure_rate"] is None else f"{row['failure_rate']:.1%}"
+            print(
+                f"{safe_text(row['workflow'])} / {safe_text(row['job'])} | {row['samples']} | "
+                f"{row['failures']} | {row['timeouts']} | {rate} | "
+                f"{row['recovered']}/{row['retried_failures']}"
+            )
+            for step, count in list(row["failed_steps"].items())[:3]:
+                print(f"  Failed step: {safe_text(step)} ({count})")
+        print(f"Showing {len(result['jobs'])} of {result['total_groups']} job groups.")
+        if not result["complete"] or result["stale"]:
+            print("Warning: incomplete or stale data; ask the operator to run ci-sync.")
+    return 0 if result["complete"] and not result["stale"] else 1
+
+
 def main() -> None:
     if len(sys.argv) > 1 and sys.argv[1] == "alias":
         raise SystemExit(aliases.main(sys.argv[2:], official_alias_command))
@@ -459,7 +529,8 @@ def main() -> None:
 
     parser.add_argument("--version", action="version", version=f"pr-rerun {VERSION}")
     parser.add_argument(
-        "target", help="PR number, 'login', 'logout', 'status', 'policy', 'alias', or 'repos'"
+        "target",
+        help="PR number, 'login', 'logout', 'status', 'policy', 'alias', 'repos', or 'stats'",
     )
     parser.add_argument("request_id", nargs="?")
     parser.add_argument("--verbose", action="store_true", help="Show excluded runs in the preview")
@@ -478,12 +549,19 @@ def main() -> None:
         "--policy-file", type=Path, help="For policy: JSON with expected_revision and policy"
     )
     parser.add_argument("--history", action="store_true", help="For policy: show policy history")
-    parser.add_argument("--json", action="store_true", help="For repos: output structured JSON")
+    parser.add_argument(
+        "--json", action="store_true", help="For repos/stats: output structured JSON"
+    )
     parser.add_argument(
         "--token-login",
         action="store_true",
         help="For login: use a legacy administrator-issued token",
     )
+    parser.add_argument("--days", type=int, help="For stats: 1..30 days (default: 7)")
+    parser.add_argument("--sort", choices=("failures", "failure-rate"), help="For stats: ranking")
+    parser.add_argument("--limit", type=int, help="For stats: 1..200 groups (default: 20)")
+    for name in ("event", "branch", "workflow", "job"):
+        parser.add_argument("--" + name, help="For stats: exact " + name + " filter")
     args = parser.parse_args()
     try:
         if args.target in {"login", "logout"} and args.request_id is not None:
@@ -498,10 +576,17 @@ def main() -> None:
             return
         if args.target != "policy" and (args.policy_file is not None or args.history):
             raise ValueError("Policy options require the policy command")
-        if args.json and args.target != "repos":
-            raise ValueError("--json requires the repos command")
+        if args.json and args.target not in {"repos", "stats"}:
+            raise ValueError("--json requires the repos or stats command")
+        if args.target != "stats" and any(
+            getattr(args, name) is not None
+            for name in ("days", "sort", "limit", "event", "branch", "workflow", "job")
+        ):
+            raise ValueError("Statistics options require the stats command")
         if args.token_login and args.target != "login":
             raise ValueError("--token-login requires the login command")
+        if args.target == "stats":
+            raise SystemExit(show_stats(args))
         if args.target == "repos":
             list_repositories(args)
             return

@@ -5,7 +5,7 @@
 
 [English](README.md) | 中文
 
-当前版本 **0.4.1**。推荐 GitHub App 模式：每仓库单独授权、独立规则，
+当前版本 **0.5.0**。推荐 GitHub App 模式：每仓库单独授权、独立规则，
 无需人工分发令牌。旧的 `gh`/Token 单仓库模式继续兼容。
 
 | 需要做什么 | 文档 |
@@ -94,6 +94,22 @@ pr-rerun logout
 保存的令牌只会用于绑定的服务器地址。同一系统账号只保存一份登录；多人共用同一个
 系统账号时，也会共用这份登录信息。
 
+
+## CI 统计（0.5.0）
+
+仓库管理员启用统计并完成后台采集后，使用现有登录查询：
+
+```bash
+pr-rerun stats --repo pypto --days 7
+pr-rerun stats --repo pypto --days 30 --sort failure-rate
+pr-rerun stats --repo pypto --json
+```
+
+展示首次 job 的失败次数、失败率、失败 step 和重跑恢复情况，支持事件、head 分支、
+workflow 路径及完整 job 名称筛选。查询只读，不触发重跑；取消和跳过不算失败样本。
+客户端和服务端均需升级，后台需单独配置定时采集；不需要重新登录或增加 App 权限。
+默认关闭、仅管理员查看，可按仓库向有使用权限的用户开放。
+[配置、采集、命令和统计口径](docs/ci-statistics.zh-CN.md)。
 
 ## 仓库清单查询（0.4.1）
 
