@@ -109,10 +109,12 @@ API 为 `GET /api/repositories/{owner}/{repo}/stats`，接受相同查询参数�
 [按 attempt 查询 job](https://docs.github.com/en/rest/actions/workflow-jobs#list-jobs-for-a-workflow-run-attempt)、
 [API 限流](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)。
 
-## 客户端显示（0.5.2）
+## 客户端显示（0.5.3）
 
 文本输出使用内置的 Rich 边框表格，数值右对齐；省略 workflow 路径前缀，长 job 名称按终端宽度换行，
-不截掉 matrix 参数。窄终端为每个 job 单独显示指标表格。失败步骤集中在表格下方，JSON 格式不变。
+不截掉 matrix 参数。窄终端为每个 job 单独显示指标表格。失败步骤使用独立的详情表格，
+包含 Workflow / Job、Failed step、Count 三列；同一 job 的步骤归为一组，组间用线分隔，
+每个 job 最多展示前三项失败步骤。窄终端按 job 分别展示步骤、次数两列表格。JSON 格式不变。
 名称中的方括号按原文显示；重定向输出时不会自动添加颜色，也可用 `NO_COLOR=1`
 关闭终端颜色。独立客户端已包含 Rich 及其依赖，用户无需额外安装。
 失败率列：当前展示结果中最高的非零失败率标红（包括并列），其它非零值标黄，

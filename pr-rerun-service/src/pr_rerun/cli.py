@@ -543,11 +543,33 @@ def stats_table(result: dict) -> None:
     console.print(f"Showing {len(rows)} of {result['total_groups']} job groups.")
     details = [row for row in result["jobs"] if row["failed_steps"]]
     if details:
-        console.print("\nFailed steps (first attempts):", style="bold")
-        for row in details:
-            console.print(Text(label(row), style="bold", overflow="fold"))
-            for step, count in list(row["failed_steps"].items())[:3]:
-                console.print(Text(f"  Failed step: {safe_text(step)} ({count})", overflow="fold"))
+        console.print("\nFailed steps (first attempts; top 3 per job):", style="bold")
+        narrow = console.width < 70
+
+        def detail_table():
+            table = Table(box=box.ROUNDED, header_style="bold cyan")
+            if not narrow:
+                table.add_column("Workflow / Job", ratio=2, overflow="fold")
+            table.add_column("Failed step", ratio=3, overflow="fold")
+            table.add_column("Count", justify="right", no_wrap=True)
+            return table
+
+        table = detail_table()
+        for group_index, row in enumerate(details):
+            if narrow:
+                console.print(Text(label(row), style="bold", overflow="fold"))
+                table = detail_table()
+            elif group_index:
+                table.add_section()
+            for step_index, (step, count) in enumerate(list(row["failed_steps"].items())[:3]):
+                cells = [Text(safe_text(step)), Text(str(count))]
+                if not narrow:
+                    cells.insert(0, Text(label(row) if step_index == 0 else ""))
+                table.add_row(*cells)
+            if narrow:
+                console.print(table)
+        if not narrow:
+            console.print(table)
 
 
 def show_stats(args) -> int:

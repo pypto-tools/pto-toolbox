@@ -136,12 +136,15 @@ References: [runs and the search cap](https://docs.github.com/en/rest/actions/wo
 [job attempts](https://docs.github.com/en/rest/actions/workflow-jobs#list-jobs-for-a-workflow-run-attempt),
 [rate limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api).
 
-## Client display (0.5.2)
+## Client display (0.5.3)
 
 Text output uses bundled Rich tables with borders and right-aligned numbers.
 Workflow path prefixes are abbreviated and long job names wrap to the terminal width without dropping
 matrix parameters. Narrow terminals use a separate metric/value table per job.
-Failed steps appear below the table. Names containing brackets are shown literally. Redirected output has
+Failed steps appear in a separate table with Workflow / Job, Failed step and Count
+columns. Steps are grouped by job with separators; each job shows its top three
+steps. Narrow terminals show a separate step/count table per job. Names containing
+brackets are shown literally. Redirected output has
 no automatic colors; `NO_COLOR=1` also disables colors in the terminal. Rich and its
 dependencies are included in the standalone client. The Rate column uses red for
 the highest nonzero rate among displayed groups (including ties), yellow for other

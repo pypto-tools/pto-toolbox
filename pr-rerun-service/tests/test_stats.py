@@ -373,7 +373,9 @@ def test_cli_text_output_escapes_job_names_and_reports_partial(tmp_path, monkeyp
     )
     output = capsys.readouterr().out
     assert "100.0%" in output and "stale" in output
-    assert "\x1b" not in output and "Failed step: Build (1)" in output
+    assert (
+        "\x1b" not in output and "Failed step" in output and "Build" in output and "Count" in output
+    )
 
 
 def test_cli_stats_old_server_and_missing_login(tmp_path, monkeypatch, capsys):
@@ -439,6 +441,7 @@ def test_rich_stats_preserves_literal_names_and_fits_terminal(monkeypatch, capsy
     monkeypatch.setenv("COLUMNS", str(columns))
     monkeypatch.delenv("FORCE_COLOR", raising=False)
     name = "compile [red]矩阵[/red] " + "a" * 100 + " (a2a3, npu, true)"
+    step_name = "Build [release] " + "步骤" * 50
     stats_table(
         {
             "jobs": [
@@ -451,7 +454,7 @@ def test_rich_stats_preserves_literal_names_and_fits_terminal(monkeypatch, capsy
                     "failure_rate": 0.375,
                     "recovered": 1,
                     "retried_failures": 2,
-                    "failed_steps": {"Build [release]": 3},
+                    "failed_steps": {step_name: 3, "Set up job": 1},
                 }
             ],
             "total_groups": 1,
@@ -462,8 +465,15 @@ def test_rich_stats_preserves_literal_names_and_fits_terminal(monkeypatch, capsy
     assert all(cell_len(line) <= columns for line in output.splitlines())
     # Ignore wrapping/borders when checking that every character survives rendering.
     flattened = "".join(output.split()).replace("│", "")
-    assert "".join(name.split()) in flattened
-    assert "37.5%" in output and "Build [release]" in output
+    job_column = "".join(line.split("│")[1] for line in output.splitlines() if "│" in line)
+    assert "".join(name.split()) in flattened or "".join(name.split()) in "".join(
+        job_column.split()
+    )
+    assert "37.5%" in output and "Count" in output
+    details = output.split("Failed steps (", 1)[1]
+    step_column = "".join(line.split("│")[-3] for line in details.splitlines() if "│" in line)
+    assert "".join(step_name.split()) in "".join(step_column.split())
+    assert "Setupjob" in "".join(step_column.split())
 
 
 @pytest.mark.parametrize("columns", [40, 120])
