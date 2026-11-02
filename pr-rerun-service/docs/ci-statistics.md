@@ -136,11 +136,17 @@ References: [runs and the search cap](https://docs.github.com/en/rest/actions/wo
 [job attempts](https://docs.github.com/en/rest/actions/workflow-jobs#list-jobs-for-a-workflow-run-attempt),
 [rate limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api).
 
-## Client display (0.5.1)
+## Client display (0.5.2)
 
-Text output uses aligned columns and right-aligned numbers. Workflow path prefixes
-are abbreviated and long job names wrap to the terminal width without dropping
-matrix parameters. Narrow terminals use stacked fields. Failed steps appear below
-the table. JSON output is unchanged. A missing completed sync is described as
+Text output uses bundled Rich tables with borders and right-aligned numbers.
+Workflow path prefixes are abbreviated and long job names wrap to the terminal width without dropping
+matrix parameters. Narrow terminals use a separate metric/value table per job.
+Failed steps appear below the table. Names containing brackets are shown literally. Redirected output has
+no automatic colors; `NO_COLOR=1` also disables colors in the terminal. Rich and its
+dependencies are included in the standalone client. The Rate column uses red for
+the highest nonzero rate among displayed groups (including ties), yellow for other
+nonzero rates, green for zero, and dim `-` for no terminal samples. All-zero results
+are entirely green; the maximum is based on the displayed selection, not hidden
+groups. JSON output is unchanged. A missing completed sync is described as
 partial collection rather than `Last sync: None`. Update only the client; server
 0.5.0 remains compatible, with no restart or new login required.

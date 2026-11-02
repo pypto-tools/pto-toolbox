@@ -6,7 +6,7 @@ An administrator runs one server; users log in through GitHub once, then use
 
 English | [中文](README.zh-CN.md)
 
-Current version: **0.5.1**. Use GitHub App mode for per-repository authorization
+Current version: **0.5.2**. Use GitHub App mode for per-repository authorization
 and policies without manually distributing tokens. Legacy single-repository
 `gh`/token deployments remain supported.
 

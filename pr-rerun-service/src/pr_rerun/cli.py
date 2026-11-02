@@ -458,29 +458,14 @@ def run_client(
 
 
 def stats_table(result: dict) -> None:
-    """Render aligned columns, wrapping names without losing matrix parameters."""
-    import unicodedata
+    """Render literal job metadata in terminal-width-aware Rich tables."""
+    from rich import box
+    from rich.cells import cell_len
+    from rich.console import Console
+    from rich.table import Table
+    from rich.text import Text
 
-    def width(text):
-        return sum(
-            0
-            if unicodedata.combining(char)
-            else 2
-            if unicodedata.east_asian_width(char) in {"W", "F"}
-            else 1
-            for char in text
-        )
-
-    def wrap(text, size):
-        lines, line, used = [], "", 0
-        for char in text:
-            length = width(char)
-            if line and used + length > size:
-                lines.append(line)
-                line, used = "", 0
-            line += char
-            used += length
-        return [*lines, line]
+    console = Console(file=sys.stdout, highlight=False)
 
     def label(row):
         workflow = row["workflow"]
@@ -492,7 +477,7 @@ def stats_table(result: dict) -> None:
                 break
         return safe_text(workflow) + " / " + safe_text(row["job"])
 
-    headers = ["JOB", "SAMPLES", "FAILED", "TIMEOUT", "RATE", "RECOVERED"]
+    headers = ["Job", "Samples", "Failed", "Timeout", "Rate", "Recovered"]
     rows = [
         [
             label(row),
@@ -504,48 +489,65 @@ def stats_table(result: dict) -> None:
         ]
         for row in result["jobs"]
     ]
-    widths = [max(width(row[index]) for row in [headers, *rows]) for index in range(6)]
-    terminal = max(20, shutil.get_terminal_size(fallback=(100, 24)).columns - 1)
-    remaining = terminal - sum(widths[1:]) - 10
-    print()
-    if remaining < 12:
-        # A narrow terminal cannot hold the numeric columns next to a job name.
-        for row in rows:
-            print("\n".join(wrap(row[0], terminal)))
+    highest_rate = max((row["failure_rate"] or 0 for row in result["jobs"]), default=0)
+
+    def rate_style(row):
+        rate = row["failure_rate"]
+        if rate is None:
+            return "dim"
+        if rate == 0:
+            return "green"
+        return "bold red" if rate == highest_rate else "yellow"
+
+    styles = [rate_style(row) for row in result["jobs"]]
+    # Reserve numeric widths, cell padding and borders, plus a readable job column.
+    numeric_width = sum(max(cell_len(row[i]) for row in [headers, *rows]) for i in range(1, 6))
+    console.print()
+    if not rows:
+        console.print("No matching job groups.")
+    elif console.width < numeric_width + 19 + 16:
+        for row, style in zip(rows, styles, strict=True):
+            console.print(Text(row[0], style="bold", overflow="fold"))
+            table = Table(box=box.ROUNDED, show_header=False)
+            table.add_column(overflow="fold")
+            table.add_column(justify="right", overflow="fold")
             for title, value in zip(headers[1:], row[1:], strict=True):
-                print(f"  {title}: {value}")
-            print()
+                table.add_row(Text(title), Text(value, style=style if title == "Rate" else ""))
+            console.print(table)
     else:
-        widths[0] = min(max(12, widths[0]), remaining)
-
-        def line(values):
-            fields = []
-            for index, (value, size) in enumerate(zip(values, widths, strict=True)):
-                padding = " " * (size - width(value))
-                fields.append(value + padding if index == 0 else padding + value)
-            return "  ".join(fields).rstrip()
-
-        print(line(headers))
-        print(line(["-" * size for size in widths]))
-        for row in rows:
-            chunks = wrap(row[0], widths[0])
-            print(line([chunks[0], *row[1:]]))
-            for chunk in chunks[1:]:
-                print(chunk)
-    print("Recovered = recovered / retried initial failures.")
-    print(f"Showing {len(rows)} of {result['total_groups']} job groups.")
+        table = Table(box=box.ROUNDED, header_style="bold cyan")
+        table.add_column(headers[0], min_width=16, overflow="fold")
+        for title in headers[1:]:
+            table.add_column(title, justify="right", no_wrap=True)
+        for row, style in zip(rows, styles, strict=True):
+            # Text objects keep workflow/job names literal, including markup-like names.
+            table.add_row(
+                *(Text(value, style=style if index == 4 else "") for index, value in enumerate(row))
+            )
+        console.print(table)
+    if rows:
+        console.print(
+            Text.assemble(
+                "Rate: ",
+                ("red", "bold red"),
+                " = highest nonzero shown; ",
+                ("yellow", "yellow"),
+                " = other nonzero; ",
+                ("green", "green"),
+                " = zero; ",
+                ("-", "dim"),
+                " = no terminal samples.",
+            )
+        )
+    console.print("Recovered = recovered / retried initial failures.")
+    console.print(f"Showing {len(rows)} of {result['total_groups']} job groups.")
     details = [row for row in result["jobs"] if row["failed_steps"]]
     if details:
-        print("\nFailed steps (first attempts):")
+        console.print("\nFailed steps (first attempts):", style="bold")
         for row in details:
-            print("\n".join(wrap(label(row), terminal)))
+            console.print(Text(label(row), style="bold", overflow="fold"))
             for step, count in list(row["failed_steps"].items())[:3]:
-                print(
-                    "\n".join(
-                        "  " + part
-                        for part in wrap(f"Failed step: {safe_text(step)} ({count})", terminal - 2)
-                    )
-                )
+                console.print(Text(f"  Failed step: {safe_text(step)} ({count})", overflow="fold"))
 
 
 def show_stats(args) -> int:

@@ -428,3 +428,90 @@ def test_run_list_missing_page_never_marked_complete(monkeypatch, tmp_path):
         assert report(store.path, RECORD, now=NOW)["complete"] is False
     finally:
         client.close()
+
+
+@pytest.mark.parametrize("columns", [40, 80, 120])
+def test_rich_stats_preserves_literal_names_and_fits_terminal(monkeypatch, capsys, columns):
+    from rich.cells import cell_len
+
+    from pr_rerun.cli import stats_table
+
+    monkeypatch.setenv("COLUMNS", str(columns))
+    monkeypatch.delenv("FORCE_COLOR", raising=False)
+    name = "compile [red]矩阵[/red] " + "a" * 100 + " (a2a3, npu, true)"
+    stats_table(
+        {
+            "jobs": [
+                {
+                    "workflow": ".github/workflows/ci.yml",
+                    "job": name,
+                    "samples": 8,
+                    "failures": 3,
+                    "timeouts": 0,
+                    "failure_rate": 0.375,
+                    "recovered": 1,
+                    "retried_failures": 2,
+                    "failed_steps": {"Build [release]": 3},
+                }
+            ],
+            "total_groups": 1,
+        }
+    )
+    output = capsys.readouterr().out
+    assert "\x1b" not in output
+    assert all(cell_len(line) <= columns for line in output.splitlines())
+    # Ignore wrapping/borders when checking that every character survives rendering.
+    flattened = "".join(output.split()).replace("│", "")
+    assert "".join(name.split()) in flattened
+    assert "37.5%" in output and "Build [release]" in output
+
+
+@pytest.mark.parametrize("columns", [40, 120])
+@pytest.mark.parametrize("rates", [[0.375, 0.125, 0, None, 0.375], [0, 0, None]])
+def test_rich_stats_rate_colors_include_ties_and_no_samples(monkeypatch, columns, rates):
+    import io
+
+    import rich.console
+    from rich.ansi import AnsiDecoder
+    from rich.console import Console
+
+    from pr_rerun.cli import stats_table
+
+    stream = io.StringIO()
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    console = Console(file=stream, force_terminal=True, color_system="standard", width=columns)
+    monkeypatch.setattr(rich.console, "Console", lambda **kwargs: console)
+    stats_table(
+        {
+            "jobs": [
+                {
+                    "workflow": "ci",
+                    "job": f"job-{index}",
+                    "samples": 0 if rate is None else 8,
+                    "failures": int((rate or 0) * 8),
+                    "timeouts": 0,
+                    "failure_rate": rate,
+                    "recovered": 0,
+                    "retried_failures": 0,
+                    "failed_steps": {},
+                }
+                for index, rate in enumerate(rates)
+            ],
+            "total_groups": len(rates),
+        }
+    )
+    decoded = list(AnsiDecoder().decode(stream.getvalue()))
+    for value, color, count in (
+        ("37.5%", "red", rates.count(0.375)),
+        ("12.5%", "yellow", rates.count(0.125)),
+        ("0.0%", "green", rates.count(0)),
+    ):
+        found = [line for line in decoded if value in line.plain]
+        assert len(found) == count
+        for line in found:
+            style = line.get_style_at_offset(console, line.plain.index(value))
+            assert style.color and style.color.number == {"red": 1, "yellow": 3, "green": 2}[color]
+    missing = [line for line in decoded if "│" in line.plain and " - " in line.plain]
+    assert len(missing) == rates.count(None)
+    for line in missing:
+        assert line.get_style_at_offset(console, line.plain.index(" - ") + 1).dim

@@ -109,9 +109,14 @@ API 为 `GET /api/repositories/{owner}/{repo}/stats`，接受相同查询参数�
 [按 attempt 查询 job](https://docs.github.com/en/rest/actions/workflow-jobs#list-jobs-for-a-workflow-run-attempt)、
 [API 限流](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)。
 
-## 客户端显示（0.5.1）
+## 客户端显示（0.5.2）
 
-文本输出按列宽对齐，数值右对齐；省略 workflow 路径前缀，长 job 名称按终端宽度换行，
-不截掉 matrix 参数。窄终端使用逐项布局。失败步骤集中在表格下方，JSON 格式不变。
+文本输出使用内置的 Rich 边框表格，数值右对齐；省略 workflow 路径前缀，长 job 名称按终端宽度换行，
+不截掉 matrix 参数。窄终端为每个 job 单独显示指标表格。失败步骤集中在表格下方，JSON 格式不变。
+名称中的方括号按原文显示；重定向输出时不会自动添加颜色，也可用 `NO_COLOR=1`
+关闭终端颜色。独立客户端已包含 Rich 及其依赖，用户无需额外安装。
+失败率列：当前展示结果中最高的非零失败率标红（包括并列），其它非零值标黄，
+零失败率标绿，无有效样本标灰色 `-`。如果全部为零则全部标绿；最高值仅针对
+当前展示的分组，不包括未展示的结果。
 尚无已完成采集时显示部分结果提示，不再显示 `Last sync: None`。只需更新客户端，
 服务端 0.5.0 可以继续使用，不需要重启或重新登录。

@@ -42,8 +42,20 @@ class Handler(BaseHTTPRequestHandler):
                     "last_sync": "2026-10-08T00:00:00Z",
                     "complete": True,
                     "stale": False,
-                    "jobs": [],
-                    "total_groups": 0,
+                    "jobs": [
+                        {
+                            "workflow": ".github/workflows/ci.yml",
+                            "job": "compile [a2a3]",
+                            "samples": 8,
+                            "failures": 3,
+                            "timeouts": 0,
+                            "failure_rate": 0.375,
+                            "recovered": 1,
+                            "retried_failures": 2,
+                            "failed_steps": {"Build [release]": 3},
+                        }
+                    ],
+                    "total_groups": 1,
                 },
             )
         elif self.path == "/api/reruns/" + REQUEST:
@@ -99,7 +111,20 @@ def main():
                 ["logout"],
             ]
             for args in commands:
-                subprocess.run([binary, *args], env=environment, check=True, timeout=30)
+                completed = subprocess.run(
+                    [binary, *args],
+                    env=environment,
+                    check=True,
+                    timeout=30,
+                    capture_output=True,
+                    text=True,
+                )
+                print(completed.stdout, end="")
+                if args == ["stats"]:
+                    assert "[a2a3]" in completed.stdout and "37.5%" in completed.stdout
+                    assert "Build [release]" in completed.stdout and "\x1b" not in completed.stdout
+                elif args == ["stats", "--json"]:
+                    assert json.loads(completed.stdout)["jobs"][0]["failure_rate"] == 0.375
             assert not (Path(temporary) / "pr-rerun/client.json").exists()
     finally:
         server.shutdown()

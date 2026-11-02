@@ -13,7 +13,19 @@ from pathlib import Path
 
 SERVICE = Path(__file__).resolve().parents[1]
 MODULES = ("__init__.py", "cli.py", "aliases.py", "client_config.py", "version.py")
-RUNTIME = ("httpx", "httpcore", "h11", "anyio", "certifi", "idna", "typing-extensions")
+RUNTIME = (
+    "httpx",
+    "httpcore",
+    "h11",
+    "anyio",
+    "certifi",
+    "idna",
+    "typing-extensions",
+    "rich",
+    "markdown-it-py",
+    "mdurl",
+    "pygments",
+)
 
 
 def main():
