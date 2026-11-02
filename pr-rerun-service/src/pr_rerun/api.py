@@ -281,6 +281,55 @@ def create_app(
         current.policies.authorize_analytics(current.policies.get(record["name"]), actor)
         return result
 
+    def error_result(owner, repo, actor, **query):
+        from pr_rerun.errors import read
+        from pr_rerun.stats import stats_path
+
+        current = registry()
+        record = current.policies.get(f"{owner}/{repo}")
+        current.policies.authorize_errors(record, actor)
+        current.auth.read_credentials(
+            record["name"], record["repository_id"], record["installation_id"]
+        )
+        result = read(stats_path(settings.database, settings.stats_database), record, **query)
+        store.authenticate_hash(actor.token_hash)
+        current.policies.authorize_errors(current.policies.get(record["name"]), actor)
+        return result
+
+    @app.get("/api/repositories/{owner}/{repo}/errors")
+    def errors(
+        owner: str,
+        repo: str,
+        actor: Annotated[Principal, Depends(principal)],
+        days: Annotated[int, Query(ge=1, le=30)] = 7,
+        limit: Annotated[int, Query(ge=1, le=200)] = 20,
+        offset: Annotated[int, Query(ge=0, le=100000)] = 0,
+        workflow: Annotated[str | None, Query(max_length=300)] = None,
+        job: Annotated[str | None, Query(max_length=500)] = None,
+        category: Annotated[str | None, Query(max_length=30)] = None,
+        event: Annotated[str | None, Query(max_length=100)] = None,
+        branch: Annotated[str | None, Query(max_length=255)] = None,
+    ):
+        return error_result(
+            owner,
+            repo,
+            actor,
+            days=days,
+            limit=limit,
+            offset=offset,
+            workflow=workflow,
+            job=job,
+            category=category,
+            event=event,
+            branch=branch,
+        )
+
+    @app.get("/api/repositories/{owner}/{repo}/errors/{error_id}")
+    def error_detail(
+        owner: str, repo: str, error_id: str, actor: Annotated[Principal, Depends(principal)]
+    ):
+        return error_result(owner, repo, actor, error_id=error_id)
+
     @app.get("/api/repositories/{owner}/{repo}/policy")
     def policy(owner: str, repo: str, actor: Annotated[Principal, Depends(principal)]):
         return registry().policy(f"{owner}/{repo}", actor)

@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh CI error excerpts every ten minutes after collection completes
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=10min
+RandomizedDelaySec=30s
+Unit=pr-rerun-errors.service
+
+[Install]
+WantedBy=timers.target

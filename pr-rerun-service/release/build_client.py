@@ -12,7 +12,7 @@ import tarfile
 from pathlib import Path
 
 SERVICE = Path(__file__).resolve().parents[1]
-MODULES = ("__init__.py", "cli.py", "aliases.py", "client_config.py", "version.py")
+MODULES = ("__init__.py", "cli.py", "cli_errors.py", "aliases.py", "client_config.py", "version.py")
 RUNTIME = (
     "httpx",
     "httpcore",

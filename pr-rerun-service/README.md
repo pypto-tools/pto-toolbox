@@ -6,7 +6,7 @@ An administrator runs one server; users log in through GitHub once, then use
 
 English | [中文](README.zh-CN.md)
 
-Current version: **0.5.3**. Use GitHub App mode for per-repository authorization
+Current version: **0.6.0**. Use GitHub App mode for per-repository authorization
 and policies without manually distributing tokens. Legacy single-repository
 `gh`/token deployments remain supported.
 
@@ -107,6 +107,20 @@ Login saves the origin and token in `~/.config/pr-rerun/client.json` (or under
 without creating a rerun. A saved token is only reused for its original server.
 One OS account stores one login; contributors sharing an OS account share that login.
 
+
+## CI error excerpts (0.6.0)
+
+Error excerpts require a separate per-repository opt-in and default to maintainer
+access, independently of aggregate statistics. Upgrade the server and client,
+then configure the independent collector. Existing logins remain valid.
+
+```bash
+pr-rerun errors --repo pypto --days 30
+pr-rerun errors --repo pypto --days 30 --group
+pr-rerun error <error-ID> --repo pypto
+```
+
+See [collection, access policy, limits and deployment](docs/ci-errors.md).
 
 ## CI statistics (0.5.0)
 

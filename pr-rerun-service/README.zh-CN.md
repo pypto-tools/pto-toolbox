@@ -5,7 +5,7 @@
 
 [English](README.md) | 中文
 
-当前版本 **0.5.3**。推荐 GitHub App 模式：每仓库单独授权、独立规则，
+当前版本 **0.6.0**。推荐 GitHub App 模式：每仓库单独授权、独立规则，
 无需人工分发令牌。旧的 `gh`/Token 单仓库模式继续兼容。
 
 | 需要做什么 | 文档 |
@@ -94,6 +94,19 @@ pr-rerun logout
 保存的令牌只会用于绑定的服务器地址。同一系统账号只保存一份登录；多人共用同一个
 系统账号时，也会共用这份登录信息。
 
+
+## CI 错误详情（0.6.0）
+
+错误片段需按仓库单独开启，默认只允许维护者查看，与汇总统计权限独立。
+需要同时更新服务端和客户端，并配置独立采集任务；已有登录继续有效。
+
+```bash
+pr-rerun errors --repo pypto --days 30
+pr-rerun errors --repo pypto --days 30 --group
+pr-rerun error <错误ID> --repo pypto
+```
+
+参见[采集、权限、限制与部署](docs/ci-errors.zh-CN.md)。
 
 ## CI 统计（0.5.0）
 

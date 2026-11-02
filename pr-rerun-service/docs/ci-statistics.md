@@ -54,7 +54,7 @@ pruned for the repository after a fully enumerated pass.
 
 The default budget is 1,500 Actions read requests per invocation (maximum 5,000).
 App authentication requests also consume quota and are not included in that counter.
-The collector stops when GitHub reports fewer than 100 remaining requests, or a
+The collector stops when GitHub reports fewer than 1,000 remaining requests, or a
 401/403/429. It does not sleep/retry indefinitely; the next timer invocation retries.
 Statistics and reruns still share installation rate limits. Adjust the budget and
 timer interval for the installation's other API users.

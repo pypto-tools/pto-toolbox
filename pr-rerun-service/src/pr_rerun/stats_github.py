@@ -70,7 +70,7 @@ class StatsGitHub:
                     self.blocked = response.status_code in {401, 403, 429}
                     raise UpstreamError(f"Statistics lookup failed (HTTP {response.status_code}).")
                 remaining = response.headers.get("x-ratelimit-remaining")
-                if remaining is not None and int(remaining) < 100:
+                if remaining is not None and int(remaining) < 1000:
                     self.blocked = True
                     raise UpstreamError("Statistics paused to preserve the GitHub API budget.")
                 value = json.loads(GitHub._read_bounded(response))
@@ -186,6 +186,13 @@ def read_run(remote: StatsGitHub, run: dict) -> dict:
                     "status": job["status"],
                     "conclusion": job.get("conclusion"),
                     "duration_seconds": duration,
+                    "failed_step_details": [
+                        {"name": str(step["name"]), "number": step["number"]}
+                        for step in job.get("steps", [])
+                        if step.get("conclusion") in {"failure", "timed_out"}
+                        and type(step.get("number")) is int
+                        and step["number"] > 0
+                    ],
                     "failed_steps": [
                         str(step["name"])
                         for step in job.get("steps", [])

@@ -197,6 +197,12 @@ def request(client: httpx.Client, method: str, path: str, body: dict | None = No
         and response.json().get("detail") == "Not Found"
     ):
         raise ValueError("CI statistics require an App-mode server version 0.5.0 or later")
+    if (
+        response.status_code == 404
+        and "/errors" in path
+        and response.json().get("detail") == "Not Found"
+    ):
+        raise ValueError("Error excerpts require an App-mode server version 0.6.0 or later")
     value = response.json()
     if not isinstance(value, dict):
         raise ValueError("Invalid service response")
@@ -643,7 +649,7 @@ def main() -> None:
     parser.add_argument("--version", action="version", version=f"pr-rerun {VERSION}")
     parser.add_argument(
         "target",
-        help="PR number, 'login', 'logout', 'status', 'policy', 'alias', 'repos', or 'stats'",
+        help="PR number, login, logout, status, policy, alias, repos, stats, errors, or error",
     )
     parser.add_argument("request_id", nargs="?")
     parser.add_argument("--verbose", action="store_true", help="Show excluded runs in the preview")
@@ -663,18 +669,21 @@ def main() -> None:
     )
     parser.add_argument("--history", action="store_true", help="For policy: show policy history")
     parser.add_argument(
-        "--json", action="store_true", help="For repos/stats: output structured JSON"
+        "--json", action="store_true", help="For repos/stats/errors/error: output structured JSON"
     )
     parser.add_argument(
         "--token-login",
         action="store_true",
         help="For login: use a legacy administrator-issued token",
     )
-    parser.add_argument("--days", type=int, help="For stats: 1..30 days (default: 7)")
+    parser.add_argument("--days", type=int, help="For stats/errors: 1..30 days (default: 7)")
     parser.add_argument("--sort", choices=("failures", "failure-rate"), help="For stats: ranking")
-    parser.add_argument("--limit", type=int, help="For stats: 1..200 groups (default: 20)")
+    parser.add_argument("--limit", type=int, help="For stats/errors: 1..200 results (default: 20)")
     for name in ("event", "branch", "workflow", "job"):
-        parser.add_argument("--" + name, help="For stats: exact " + name + " filter")
+        parser.add_argument("--" + name, help="For stats/errors: exact " + name + " filter")
+    parser.add_argument("--offset", type=int, help="For errors: pagination offset")
+    parser.add_argument("--category", help="For errors: exact category")
+    parser.add_argument("--group", action="store_true", help="For errors: group similar summaries")
     args = parser.parse_args()
     try:
         if args.target in {"login", "logout"} and args.request_id is not None:
@@ -689,15 +698,23 @@ def main() -> None:
             return
         if args.target != "policy" and (args.policy_file is not None or args.history):
             raise ValueError("Policy options require the policy command")
-        if args.json and args.target not in {"repos", "stats"}:
-            raise ValueError("--json requires the repos or stats command")
-        if args.target != "stats" and any(
+        if args.json and args.target not in {"repos", "stats", "errors", "error"}:
+            raise ValueError("--json requires repos, stats, errors or error")
+        if args.target not in {"stats", "errors", "error"} and any(
             getattr(args, name) is not None
             for name in ("days", "sort", "limit", "event", "branch", "workflow", "job")
         ):
             raise ValueError("Statistics options require the stats command")
         if args.token_login and args.target != "login":
             raise ValueError("--token-login requires the login command")
+        if args.target not in {"errors", "error"} and (
+            args.offset is not None or args.category is not None or args.group
+        ):
+            raise ValueError("Error filters require the errors command")
+        if args.target in {"errors", "error"}:
+            from pr_rerun.cli_errors import show
+
+            raise SystemExit(show(args))
         if args.target == "stats":
             raise SystemExit(show_stats(args))
         if args.target == "repos":

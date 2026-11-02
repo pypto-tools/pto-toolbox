@@ -11,6 +11,17 @@ from pathlib import Path
 
 TOKEN = "prr_" + "a" * 43
 REQUEST = "rr_" + "1" * 32
+ERROR = {
+    "id": "err_" + "2" * 32,
+    "workflow": "ci.yml",
+    "job": "compile [a2a3]",
+    "step": "Build [release]",
+    "attempt": 1,
+    "status": "ready",
+    "category": "compile",
+    "summary": "error: [literal]",
+    "excerpt": "1: error: [literal]",
+}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -58,6 +69,33 @@ class Handler(BaseHTTPRequestHandler):
                     "total_groups": 1,
                 },
             )
+        elif self.path.startswith("/api/repositories/example/project/errors?"):
+            self.reply(
+                200,
+                {
+                    "repository": "example/project",
+                    "since": "2026-10-01",
+                    "until": "2026-10-08",
+                    "coverage": {"ready": 1},
+                    "metadata_complete": True,
+                    "logs_complete": True,
+                    "stale": False,
+                    "total": 1,
+                    "offset": 0,
+                    "next_offset": None,
+                    "items": [ERROR],
+                    "groups": [
+                        {
+                            "category": "compile",
+                            "count": 1,
+                            "summary": ERROR["summary"],
+                            "example_id": ERROR["id"],
+                        }
+                    ],
+                },
+            )
+        elif self.path == "/api/repositories/example/project/errors/" + ERROR["id"]:
+            self.reply(200, {"repository": "example/project", "error": ERROR})
         elif self.path == "/api/reruns/" + REQUEST:
             self.reply(200, {"request_id": REQUEST, "state": "accepted", "runs": []})
         else:
@@ -106,6 +144,11 @@ def main():
                 ["repos", "--json"],
                 ["stats"],
                 ["stats", "--json"],
+                ["errors"],
+                ["errors", "--group"],
+                ["errors", "--json"],
+                ["error", ERROR["id"]],
+                ["error", ERROR["id"], "--json"],
                 ["alias", "set", "demo", "example/project"],
                 ["alias", "list"],
                 ["logout"],
@@ -123,6 +166,10 @@ def main():
                 if args == ["stats"]:
                     assert "[a2a3]" in completed.stdout and "37.5%" in completed.stdout
                     assert "Build [release]" in completed.stdout and "\x1b" not in completed.stdout
+                elif args[0] in {"errors", "error"}:
+                    assert "[literal]" in completed.stdout
+                    if "--json" in args:
+                        assert json.loads(completed.stdout)["repository"] == "example/project"
                 elif args == ["stats", "--json"]:
                     assert json.loads(completed.stdout)["jobs"][0]["failure_rate"] == 0.375
             assert not (Path(temporary) / "pr-rerun/client.json").exists()
