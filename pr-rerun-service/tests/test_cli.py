@@ -147,8 +147,9 @@ def test_no_noninteractive_confirmation(monkeypatch):
     [("", 1), ("n", 1), ("yes", 1), ("owner/repo#123 @alice", 1), ("y", 2), (" Y ", 2)],
 )
 @pytest.mark.parametrize("verbose", [False, True])
+@pytest.mark.parametrize("jobs", ["legacy", "mixed", "cancelled"])
 def test_cli_requires_explicit_yes_and_preserves_server_confirmation(
-    monkeypatch, capsys, answer, expected_posts, verbose
+    monkeypatch, capsys, answer, expected_posts, verbose, jobs
 ):
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
 
@@ -181,7 +182,8 @@ def test_cli_requires_explicit_yes_and_preserves_server_confirmation(
                             "name": "CI",
                             "mode": "failed",
                             "attempt": 1,
-                            "failed_jobs": ["test"],
+                            "failed_jobs": [] if jobs == "cancelled" else ["test"],
+                            **({"cancelled_jobs": ["compile"]} if jobs != "legacy" else {}),
                             "url": "https://github.com/run",
                         }
                     ],
@@ -214,6 +216,9 @@ def test_cli_requires_explicit_yes_and_preserves_server_confirmation(
     assert "Confirm reruns for: owner/repo#123 @alice" in output
     assert "Type exactly" not in output
     assert ("Excluded: Run 456: completed / success." in output) == verbose
+    assert ("    Failed: test" in output) == (jobs != "cancelled")
+    assert ("    Cancelled: compile" in output) == (jobs != "legacy")
+    assert "    Failed: \n" not in output
 
 
 def test_cli_reports_request_id_after_lost_confirmation_response(monkeypatch, capsys):

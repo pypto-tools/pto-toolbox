@@ -6,7 +6,7 @@ An administrator runs one server; users log in through GitHub once, then use
 
 English | [中文](README.zh-CN.md)
 
-Current version: **0.7.0**. Use GitHub App mode for per-repository authorization
+Current version: **0.7.1**. Use GitHub App mode for per-repository authorization
 and policies without manually distributing tokens. Legacy single-repository
 `gh`/token deployments remain supported.
 
@@ -22,7 +22,8 @@ and policies without manually distributing tokens. Legacy single-repository
 
 - Ordinary CI failures rerun failed jobs. The configured Codex Review workflow
   reruns all jobs in that workflow, after verifying its PR identity artifact.
-  Completed cancelled runs qualify only if they contain failed or timed-out jobs.
+  Completed runs qualify when they contain failed, timed-out or cancelled jobs.
+  The preview lists failed and cancelled jobs separately.
 - GitHub device login verifies an immutable user ID and issues a persistent service
   session. Contributors need neither repository write access nor a `gh` login.
 - In App mode, the server obtains temporary installation credentials restricted to

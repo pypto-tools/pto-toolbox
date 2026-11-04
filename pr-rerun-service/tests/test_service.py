@@ -304,6 +304,7 @@ def test_cancelled_runs_with_failed_jobs_keep_the_confirmed_rerun_modes(
         ("failed", ["compile"]),
         ("all", ["compile"]),
     ]
+    assert all(run["cancelled_jobs"] == ["system-tests"] for run in plan["runs"])
     assert not remote.writes
     assert confirm(client, plan).json()["state"] == "accepted"
     assert remote.writes == [
@@ -312,7 +313,7 @@ def test_cancelled_runs_with_failed_jobs_keep_the_confirmed_rerun_modes(
     ]
 
 
-@pytest.mark.parametrize("conclusion", ["cancelled", "success", "skipped"])
+@pytest.mark.parametrize("conclusion", ["success", "skipped", "neutral", None])
 def test_cancelled_runs_without_failed_jobs_do_not_issue_a_ticket(client, remote, conclusion):
     for run_id, run in remote.runs.items():
         run["conclusion"] = "cancelled"
@@ -320,17 +321,78 @@ def test_cancelled_runs_without_failed_jobs_do_not_issue_a_ticket(client, remote
     plan = client.post("/api/reruns/preview", json={"pr": 123}).json()
     assert not plan["eligible"]
     assert "ticket" not in plan
-    assert all("no failed jobs" in reason for reason in plan["skipped"])
+    assert all("no failed or cancelled jobs" in reason for reason in plan["skipped"])
     assert not remote.writes
 
 
-def test_newer_cancelled_run_without_failures_supersedes_older_failure(client, remote):
+def test_newer_cancelled_run_supersedes_older_failure(client, remote):
     newer = copy.deepcopy(remote.runs[101])
     newer.update(id=303, run_number=303, conclusion="cancelled")
     remote.runs[303] = newer
     remote.linked.append(303)
     remote.job_overrides[303] = [{"name": "unit-tests", "conclusion": "cancelled"}]
-    assert [run["run_id"] for run in preview(client)["runs"]] == [202]
+    assert [run["run_id"] for run in preview(client)["runs"]] == [303, 202]
+    assert not remote.writes
+
+
+@pytest.mark.parametrize("fork", [False, True])
+@pytest.mark.parametrize("conclusion", ["failure", "cancelled"])
+def test_only_cancelled_jobs_are_eligible_and_preserve_rerun_modes(
+    client, remote, fork, conclusion
+):
+    for run_id, run in remote.runs.items():
+        run["conclusion"] = conclusion
+        remote.job_overrides[run_id] = [
+            {"name": "unit-tests", "conclusion": "cancelled"},
+            {"name": "lint", "conclusion": "success"},
+            {"name": "deploy", "conclusion": "skipped"},
+        ]
+    if fork:
+        remote.runs[101]["pull_requests"] = []
+    plan = preview(client)
+    assert [(run["mode"], run["failed_jobs"], run["cancelled_jobs"]) for run in plan["runs"]] == [
+        ("failed", [], ["unit-tests"]),
+        ("all", [], ["unit-tests"]),
+    ]
+    assert not remote.writes
+    assert confirm(client, plan).json()["state"] == "accepted"
+    assert remote.writes == [
+        f"/repos/{REPO}/actions/runs/101/rerun-failed-jobs",
+        f"/repos/{REPO}/actions/runs/202/rerun",
+    ]
+
+
+@pytest.mark.parametrize("phase", ["confirmation", "before_post"])
+@pytest.mark.parametrize("change", ["success", "failure", "renamed", "empty", "in_progress"])
+def test_cancelled_jobs_are_rechecked_at_confirmation_and_before_post(
+    client, remote, phase, change
+):
+    remote.runs[101]["conclusion"] = "cancelled"
+    remote.job_overrides[101] = [{"name": "unit-tests", "conclusion": "cancelled"}]
+    plan = preview(client)
+    lookups = 0
+
+    def mutate(request):
+        nonlocal lookups
+        if request.url.path.endswith("/runs/101/attempts/1/jobs"):
+            lookups += 1
+            if lookups == (1 if phase == "confirmation" else 2):
+                remote.job_overrides[101] = (
+                    []
+                    if change == "empty"
+                    else [
+                        {
+                            "name": "other" if change == "renamed" else "unit-tests",
+                            "conclusion": None
+                            if change == "in_progress"
+                            else ("cancelled" if change == "renamed" else change),
+                        }
+                    ]
+                )
+
+    remote.on_call = mutate
+    assert confirm(client, plan).json()["state"] == "rejected"
+    assert lookups == (1 if phase == "confirmation" else 2)
     assert not remote.writes
 
 

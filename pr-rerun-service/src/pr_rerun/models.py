@@ -156,6 +156,7 @@ class RunPlan(StrictModel):
     mode: Mode
     failed_jobs: tuple[str, ...]
     url: str
+    cancelled_jobs: tuple[str, ...] = ()
 
 
 class Plan(StrictModel):

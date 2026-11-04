@@ -22,8 +22,7 @@ from pr_rerun.models import (
 )
 
 FAILURES = {"failure", "timed_out"}
-# A cancelled workflow can still contain failed jobs. Job conclusions, checked
-# below, decide eligibility; cancellation by itself is never enough.
+# Require retryable jobs in the latest completed run, including cancellation.
 RERUN_CONCLUSIONS = FAILURES | {"cancelled"}
 LOOKUP_WORKERS = 4
 LOG = logging.getLogger("pr_rerun.performance")
@@ -224,8 +223,11 @@ class Planner:
                 continue
             jobs = self.github.jobs(run_id, attempt)
             failed = tuple(sorted(job["name"] for job in jobs if job["conclusion"] in FAILURES))
-            if not failed:
-                skipped.append(f"Run {run_id}: no failed jobs were found.")
+            cancelled = tuple(
+                sorted(job["name"] for job in jobs if job["conclusion"] == "cancelled")
+            )
+            if not failed and not cancelled:
+                skipped.append(f"Run {run_id}: no failed or cancelled jobs were found.")
                 continue
             selected.append(
                 RunPlan(
@@ -236,6 +238,7 @@ class Planner:
                     name=run["name"],
                     mode=self.rules[path].mode,
                     failed_jobs=failed,
+                    cancelled_jobs=cancelled,
                     url=f"https://github.com/{self.settings.repository}/actions/runs/{run_id}",
                 )
             )
@@ -277,5 +280,10 @@ class Planner:
             raise ServiceError(409, "Workflow state changed after confirmation.")
         jobs = self.github.jobs(run.run_id, run.attempt)
         failed = tuple(sorted(job["name"] for job in jobs if job["conclusion"] in FAILURES))
-        if not failed or failed != run.failed_jobs:
-            raise ServiceError(409, "Failed jobs changed after confirmation.")
+        cancelled = tuple(sorted(job["name"] for job in jobs if job["conclusion"] == "cancelled"))
+        if (
+            not (failed or cancelled)
+            or failed != run.failed_jobs
+            or cancelled != run.cancelled_jobs
+        ):
+            raise ServiceError(409, "Failed or cancelled jobs changed after confirmation.")

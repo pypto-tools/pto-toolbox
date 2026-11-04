@@ -429,14 +429,17 @@ def run_client(
         for reason in preview.get("skipped", []):
             print(f"Excluded: {safe_text(reason)}")
     if not preview["eligible"]:
-        print("No verified failed runs are eligible. No rerun was requested.")
+        print("No verified failed or cancelled runs are eligible. No rerun was requested.")
         if preview.get("skipped") and not verbose:
             print("Use --verbose to see excluded runs.")
         return 2
     print("Proposed reruns:")
     for run in preview["runs"]:
         print(f"  {safe_text(run['name'])}: rerun {run['mode']} (attempt {run['attempt']})")
-        print(f"    Failed: {safe_text(', '.join(run['failed_jobs']))}")
+        if run["failed_jobs"]:
+            print(f"    Failed: {safe_text(', '.join(run['failed_jobs']))}")
+        if run.get("cancelled_jobs"):
+            print(f"    Cancelled: {safe_text(', '.join(run['cancelled_jobs']))}")
         print(f"    {safe_text(run['url'])}")
     request_id = preview["request_id"]
     print(f"Request ID: {safe_text(request_id)}")
