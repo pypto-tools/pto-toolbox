@@ -5,7 +5,7 @@
 
 [English](README.md) | 中文
 
-当前版本 **0.7.1**。推荐 GitHub App 模式：每仓库单独授权、独立规则，
+当前版本 **0.8.0**。推荐 GitHub App 模式：每仓库单独授权、独立规则，
 无需人工分发令牌。旧的 `gh`/Token 单仓库模式继续兼容。
 
 | 需要做什么 | 文档 |
@@ -74,6 +74,7 @@ pr-rerun login --netbird-server http://100.64.0.10:8080 --repo pypto
 
 # 之后包括新开终端，直接指定 PR：
 pr-rerun 123
+pr-rerun 10 11 12 --repo simpler
 pr-rerun 456 --repo another/project
 pr-rerun repos
 # 可选：清除当前用户的登录状态
@@ -89,6 +90,14 @@ pr-rerun logout
 不会要求确认。`accepted` 只表示 GitHub 接受请求，不表示 CI 通过；用 Actions 链接查看
 任务运行结果，用 `pr-rerun status rr_REQUEST_ID` 查询服务提交状态。
 排查任务为何被排除时使用 `pr-rerun 123 --verbose`。
+
+0.8.0+ 客户端支持同一仓库的多个 PR，例如 `pr-rerun 10 11 12 --repo simpler`。
+每个 PR 单独校验、展示预览并要求输入 `y` 确认；回车或 `n` 跳过当前 PR，Ctrl-C
+或输入结束停止后续处理。重复编号按首次出现顺序去重，所有编号在读取凭据和请求前
+统一校验。某个 PR 无可重跑任务或请求失败时，会报告原因并继续其它 PR，最后以表格
+汇总每个 PR 的结果和请求 ID。确认响应丢失或提交中断时不会自动重试，应按请求 ID
+查询状态。退出码 0 表示全部被接受，1 表示用户跳过或中断，2 表示错误、不符合条件、
+部分提交或确认结果不明；混合结果取最高退出码。现有服务端无需更新，仓库限额仍逐个生效。
 
 登录将地址和令牌保存在 `~/.config/pr-rerun/client.json`，或 `XDG_CONFIG_HOME`
 指定的目录，目录和文件权限分别为 `0700`、`0600`。登录只验证身份，不触发重跑。

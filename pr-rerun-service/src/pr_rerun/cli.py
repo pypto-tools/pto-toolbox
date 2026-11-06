@@ -11,6 +11,7 @@ import sys
 import threading
 import time
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -32,6 +33,7 @@ from pr_rerun.client_config import (
 LOGIN_PROBE = "/api/reruns/rr_" + "0" * 32
 AUTH_ERROR = "Service login is expired or revoked. Run 'pr-rerun login' again."
 PROGRESS_INTERVAL = 0.1
+PR_NUMBER = r"[1-9][0-9]{0,9}"
 
 
 @contextmanager
@@ -409,8 +411,78 @@ def run_client(
         if not request_id or not re.fullmatch(r"rr_[0-9a-f]{32}", request_id):
             raise ValueError("Usage: pr-rerun status rr_<request-id>")
         return show_result(request(client, "GET", f"/api/reruns/{request_id}"))
-    if request_id is not None or not re.fullmatch(r"[1-9][0-9]{0,9}", target):
+    if request_id is not None or not re.fullmatch(PR_NUMBER, target):
         raise ValueError("Specify a positive PR number, or 'status' and a request ID")
+    return _rerun_pr(client, target, repository, verbose=verbose).code
+
+
+@dataclass(frozen=True)
+class _PRResult:
+    code: int
+    state: str
+    request_id: str | None = None
+
+
+class _ConfirmationInterrupted(KeyboardInterrupt):
+    def __init__(self, request_id: str):
+        self.request_id = request_id
+
+
+def pr_numbers(values: list[str]) -> list[str]:
+    if not values or any(not re.fullmatch(PR_NUMBER, value) for value in values):
+        raise ValueError("Specify positive PR numbers, for example: pr-rerun 10 11 12")
+    return list(dict.fromkeys(values))
+
+
+def run_batch(
+    client: httpx.Client, targets: list[str], repository: str | None, *, verbose: bool = False
+) -> int:
+    targets = pr_numbers(targets)
+    if len(targets) == 1:
+        return run_client(client, targets[0], None, repository, verbose=verbose)
+    if not sys.stdin.isatty():
+        raise ValueError("An interactive terminal is required to inspect and confirm each PR")
+    from rich.console import Console
+    from rich.table import Table
+    from rich.text import Text
+
+    results: list[tuple[str, _PRResult]] = []
+    for index, target in enumerate(targets):
+        print(f"\nPR {index + 1}/{len(targets)}: #{target}")
+        try:
+            result = _rerun_pr(client, target, repository, verbose=verbose)
+        except (EOFError, KeyboardInterrupt) as error:
+            result = (
+                _PRResult(2, "needs inspection", error.request_id)
+                if isinstance(error, _ConfirmationInterrupted)
+                else _PRResult(1, "interrupted")
+            )
+            results.append((target, result))
+            results.extend(
+                (number, _PRResult(1, "not processed")) for number in targets[index + 1 :]
+            )
+            print("\nBatch stopped. Earlier accepted requests remain submitted.")
+            break
+        except (ValueError, OSError, httpx.HTTPError) as error:
+            print(f"PR #{target}: {safe_text(error)}", file=sys.stderr)
+            result = _PRResult(2, "error")
+        results.append((target, result))
+    table = Table(title="Batch results", header_style="bold cyan")
+    for name in ("PR", "Result", "Request ID"):
+        table.add_column(name, overflow="fold")
+    for target, result in results:
+        table.add_row(
+            Text("#" + target),
+            Text(safe_text(result.state)),
+            Text(safe_text(result.request_id or "-")),
+        )
+    Console(highlight=False).print(table)
+    return max(result.code for _, result in results)
+
+
+def _rerun_pr(
+    client: httpx.Client, target: str, repository: str | None, *, verbose: bool = False
+) -> _PRResult:
     if not sys.stdin.isatty():
         raise ValueError("An interactive terminal is required to inspect and confirm a PR")
     payload: dict = {"pr": int(target)}
@@ -419,6 +491,8 @@ def run_client(
     with progress("Checking PR and workflows"):
         preview = request(client, "POST", "/api/reruns/preview", payload)
     pr = preview["pr"]
+    if pr["number"] != int(target):
+        raise ValueError("Service preview does not match the requested PR; no confirmation sent")
     print(f"Repository: {safe_text(preview['repository'])}")
     print(f"PR #{pr['number']}: {safe_text(pr['title'])}")
     print(f"Author: @{safe_text(pr['author'])} (verified against your service identity)")
@@ -432,7 +506,7 @@ def run_client(
         print("No verified failed or cancelled runs are eligible. No rerun was requested.")
         if preview.get("skipped") and not verbose:
             print("Use --verbose to see excluded runs.")
-        return 2
+        return _PRResult(2, "ineligible")
     print("Proposed reruns:")
     for run in preview["runs"]:
         print(f"  {safe_text(run['name'])}: rerun {run['mode']} (attempt {run['attempt']})")
@@ -447,7 +521,7 @@ def run_client(
     answer = input("Confirm? [y/N] ").strip().lower()
     if answer != "y":
         print("Cancelled. No rerun was requested.")
-        return 1
+        return _PRResult(1, "declined", request_id)
     try:
         with progress("Rechecking and submitting reruns"):
             result = request(
@@ -459,11 +533,14 @@ def run_client(
                     "confirmation": preview["confirmation"],
                 },
             )
+    except (EOFError, KeyboardInterrupt):
+        print(f"\nConfirmation interrupted. Inspect: pr-rerun status {safe_text(request_id)}")
+        raise _ConfirmationInterrupted(request_id) from None
     except (httpx.HTTPError, ValueError):
         print("Confirmation response was unavailable. Do not blindly submit another rerun.")
         print(f"Inspect: pr-rerun status {safe_text(request_id)}")
-        return 2
-    return show_result(result)
+        return _PRResult(2, "needs inspection", request_id)
+    return _PRResult(show_result(result), result["state"], request_id)
 
 
 def stats_table(result: dict) -> None:
@@ -656,9 +733,17 @@ def main() -> None:
     parser.add_argument("--version", action="version", version=f"pr-rerun {VERSION}")
     parser.add_argument(
         "target",
-        help="PR number, login, logout, status, policy, alias, repos, stats, errors, error, or mcp",
+        help="PR numbers, login, logout, status, policy, alias, repos, stats, errors, error, mcp",
     )
-    parser.add_argument("request_id", nargs="?")
+    parser.add_argument(
+        "request_id",
+        nargs="?",
+        metavar="PR_OR_REQUEST_ID",
+        help="Next PR number, or the request/error ID for status/error",
+    )
+    parser.add_argument(
+        "additional_prs", nargs="*", help="Additional PR numbers in the same repository"
+    )
     parser.add_argument("--verbose", action="store_true", help="Show excluded runs in the preview")
     endpoint = parser.add_mutually_exclusive_group()
     endpoint.add_argument(
@@ -691,8 +776,29 @@ def main() -> None:
     parser.add_argument("--offset", type=int, help="For errors: pagination offset")
     parser.add_argument("--category", help="For errors: exact category")
     parser.add_argument("--group", action="store_true", help="For errors: group similar summaries")
-    args = parser.parse_args()
+    args = parser.parse_intermixed_args()
     try:
+        numeric_target = re.fullmatch(PR_NUMBER, args.target) is not None
+        if not numeric_target and args.target not in {
+            "login",
+            "logout",
+            "status",
+            "policy",
+            "repos",
+            "stats",
+            "errors",
+            "error",
+        }:
+            raise ValueError("Specify positive PR numbers or a supported command")
+        if args.additional_prs and not numeric_target:
+            raise ValueError("Additional PR numbers require a PR number as the first argument")
+        targets = (
+            pr_numbers(
+                [args.target, *([args.request_id] if args.request_id else []), *args.additional_prs]
+            )
+            if numeric_target
+            else []
+        )
         if args.target in {"login", "logout"} and args.request_id is not None:
             raise ValueError(f"Usage: pr-rerun {args.target}")
         if args.target == "logout":
@@ -787,6 +893,8 @@ def main() -> None:
                 value = request(client, "POST" if payload is not None else "GET", path, payload)
                 print(json.dumps(value, indent=2))
                 code = 0
+            elif numeric_target:
+                code = run_batch(client, targets, repository, verbose=args.verbose)
             else:
                 code = run_client(
                     client, args.target, args.request_id, repository, verbose=args.verbose

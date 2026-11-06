@@ -2,6 +2,7 @@
 
 import json
 import os
+import pty
 import subprocess
 import sys
 import tempfile
@@ -25,6 +26,8 @@ ERROR = {
 
 
 class Handler(BaseHTTPRequestHandler):
+    batch_events = []
+
     def log_message(self, format, *args):
         pass
 
@@ -102,7 +105,7 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(404, {"error": "Request not found."})
 
     def do_POST(self):
-        self.rfile.read(int(self.headers.get("Content-Length", "0")))
+        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
         if self.path == "/api/auth/device/start":
             self.reply(
                 200,
@@ -116,8 +119,80 @@ class Handler(BaseHTTPRequestHandler):
             )
         elif self.path == "/api/auth/device/poll":
             self.reply(200, {"state": "authorized", "access_token": TOKEN, "login": "test-user"})
+        elif self.path == "/api/reruns/preview":
+            assert self.headers.get("Authorization") == "Bearer " + TOKEN
+            number = body["pr"]
+            assert body["repository"] == "example/project"
+            self.batch_events.append(("preview", number))
+            self.reply(
+                200,
+                {
+                    "eligible": True,
+                    "repository": "example/project",
+                    "pr": {
+                        "number": number,
+                        "title": "Batch test",
+                        "author": "test-user",
+                        "head_sha": "a" * 40,
+                        "base_ref": "main",
+                        "url": "https://github.com/pr",
+                    },
+                    "runs": [
+                        {
+                            "name": "CI",
+                            "mode": "failed",
+                            "attempt": 1,
+                            "failed_jobs": ["test"],
+                            "url": "https://github.com/run",
+                        }
+                    ],
+                    "request_id": f"rr_{number:032x}",
+                    "ticket": f"ticket-{number}",
+                    "confirmation": f"example/project#{number} @test-user",
+                },
+            )
+        elif self.path == "/api/reruns/confirm":
+            assert self.headers.get("Authorization") == "Bearer " + TOKEN
+            number = int(body["ticket"].removeprefix("ticket-"))
+            assert body["confirmation"] == f"example/project#{number} @test-user"
+            self.batch_events.append(("confirm", number))
+            self.reply(202, {"request_id": f"rr_{number:032x}", "state": "accepted", "runs": []})
         else:
             self.reply(400, {"error": "Unexpected write; no reruns are supported by this test"})
+
+
+def check_batch(binary, environment):
+    master, slave = pty.openpty()
+    process = None
+    try:
+        process = subprocess.Popen(
+            [binary, "10", "11", "10", "12", "--repo", "example/project"],
+            env=environment,
+            stdin=slave,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        os.write(master, b"y\ny\ny\n")
+        output, _ = process.communicate(timeout=30)
+        assert process.returncode == 0, output
+        assert Handler.batch_events == [
+            ("preview", 10),
+            ("confirm", 10),
+            ("preview", 11),
+            ("confirm", 11),
+            ("preview", 12),
+            ("confirm", 12),
+        ]
+        assert "Batch results" in output and "PR 3/3: #12" in output
+        assert all(f"rr_{number:032x}" in output for number in (10, 11, 12))
+        print("Client batch preview, per-PR confirmation, deduplication and summary passed")
+    finally:
+        if process is not None and process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+        os.close(master)
+        os.close(slave)
 
 
 def main():
@@ -155,6 +230,8 @@ def main():
                 ["logout"],
             ]
             for args in commands:
+                if args == ["logout"]:
+                    check_batch(binary, environment)
                 completed = subprocess.run(
                     [binary, *args],
                     env=environment,

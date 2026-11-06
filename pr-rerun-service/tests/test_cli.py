@@ -3,7 +3,7 @@ import json
 import httpx
 import pytest
 
-from pr_rerun.cli import configured_server, main, run_client, safe_text, server_origin
+from pr_rerun.cli import configured_server, main, run_batch, run_client, safe_text, server_origin
 
 
 @pytest.fixture(autouse=True)
@@ -254,3 +254,258 @@ def test_cli_reports_request_id_after_lost_confirmation_response(monkeypatch, ca
     ) as client:
         assert run_client(client, "123", None) == 2
     assert f"pr-rerun status {request_id}" in capsys.readouterr().out
+
+
+class BatchRemote:
+    def __init__(self):
+        self.events = []
+        self.scenarios = {}
+        self.alias_lookups = 0
+
+    @staticmethod
+    def request_id(number):
+        return f"rr_{number:032x}"
+
+    def __call__(self, request):
+        if request.url.path == "/api/repository-aliases/demo":
+            self.alias_lookups += 1
+            assert request.method == "GET"
+            return httpx.Response(200, json={"repository": "owner/repo"})
+        assert request.method == "POST"
+        payload = json.loads(request.content)
+        if request.url.path == "/api/reruns/preview":
+            number = payload["pr"]
+            assert payload.get("repository", "owner/repo") == "owner/repo"
+            self.events.append(("preview", number))
+            scenario = self.scenarios.get(number)
+            if scenario == "forbidden":
+                return httpx.Response(403, json={"error": "You may rerun only your own PRs."})
+            if scenario == "preview_timeout":
+                raise httpx.ReadTimeout("timeout", request=request)
+            return httpx.Response(
+                200,
+                json={
+                    "eligible": scenario != "ineligible",
+                    "repository": "owner/repo",
+                    "pr": {
+                        "number": number + 100 if scenario == "wrong_pr" else number,
+                        "title": f"Fix {number}",
+                        "author": "alice",
+                        "head_sha": "a" * 40,
+                        "base_ref": "main",
+                        "url": f"https://github.com/owner/repo/pull/{number}",
+                    },
+                    "runs": [
+                        {
+                            "name": "CI",
+                            "mode": "failed",
+                            "attempt": 1,
+                            "failed_jobs": ["test"],
+                            "url": "https://github.com/run",
+                        }
+                    ],
+                    "request_id": self.request_id(number),
+                    "ticket": f"ticket-{number}",
+                    "confirmation": f"owner/repo#{number} @alice",
+                },
+            )
+        assert request.url.path == "/api/reruns/confirm"
+        number = int(payload["ticket"].removeprefix("ticket-"))
+        assert payload["confirmation"] == f"owner/repo#{number} @alice"
+        self.events.append(("confirm", number))
+        scenario = self.scenarios.get(number)
+        if scenario == "confirm_timeout":
+            raise httpx.ReadTimeout("timeout", request=request)
+        if scenario == "confirm_interrupt":
+            raise KeyboardInterrupt
+        return httpx.Response(
+            202,
+            json={
+                "request_id": self.request_id(number),
+                "state": "partial" if scenario == "partial" else "accepted",
+                "runs": [],
+            },
+        )
+
+
+@pytest.fixture
+def batch_remote(monkeypatch):
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda prompt: "y")
+    return BatchRemote()
+
+
+def test_batch_checks_and_confirms_each_pr_in_order_and_deduplicates(batch_remote, capsys):
+    with httpx.Client(
+        base_url="https://example.test", transport=httpx.MockTransport(batch_remote)
+    ) as client:
+        assert run_batch(client, ["10", "11", "10", "12"], "owner/repo") == 0
+    assert batch_remote.events == [
+        ("preview", 10),
+        ("confirm", 10),
+        ("preview", 11),
+        ("confirm", 11),
+        ("preview", 12),
+        ("confirm", 12),
+    ]
+    output = capsys.readouterr().out
+    assert "Batch results" in output
+    assert "PR 3/3: #12" in output
+    assert all(batch_remote.request_id(n) in output for n in (10, 11, 12))
+
+
+def test_batch_decline_skips_only_current_pr(batch_remote, monkeypatch, capsys):
+    answers = iter(["n", "y", "y"])
+    monkeypatch.setattr("builtins.input", lambda prompt: next(answers))
+    with httpx.Client(
+        base_url="https://example.test", transport=httpx.MockTransport(batch_remote)
+    ) as client:
+        assert run_batch(client, ["10", "11", "12"], "owner/repo") == 1
+    assert batch_remote.events == [
+        ("preview", 10),
+        ("preview", 11),
+        ("confirm", 11),
+        ("preview", 12),
+        ("confirm", 12),
+    ]
+    assert "declined" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        "forbidden",
+        "ineligible",
+        "preview_timeout",
+        "confirm_timeout",
+        "partial",
+        "wrong_pr",
+    ],
+)
+def test_batch_continues_after_one_pr_error_without_retrying(batch_remote, capsys, scenario):
+    batch_remote.scenarios[11] = scenario
+    with httpx.Client(
+        base_url="https://example.test", transport=httpx.MockTransport(batch_remote)
+    ) as client:
+        assert run_batch(client, ["10", "11", "12"], "owner/repo") == 2
+    assert batch_remote.events[0:2] == [("preview", 10), ("confirm", 10)]
+    assert batch_remote.events[-2:] == [("preview", 12), ("confirm", 12)]
+    assert batch_remote.events.count(("preview", 11)) == 1
+    assert batch_remote.events.count(("confirm", 11)) == (
+        1 if scenario in {"confirm_timeout", "partial"} else 0
+    )
+    output = capsys.readouterr().out
+    assert "Batch results" in output
+    if scenario == "confirm_timeout":
+        assert "needs inspection" in output
+        assert f"pr-rerun status {batch_remote.request_id(11)}" in output
+
+
+@pytest.mark.parametrize("exception", [EOFError, KeyboardInterrupt])
+def test_batch_interrupt_at_prompt_stops_remaining_prs(
+    batch_remote, monkeypatch, capsys, exception
+):
+    count = 0
+
+    def answer(prompt):
+        nonlocal count
+        count += 1
+        if count == 2:
+            raise exception
+        return "y"
+
+    monkeypatch.setattr("builtins.input", answer)
+    with httpx.Client(
+        base_url="https://example.test", transport=httpx.MockTransport(batch_remote)
+    ) as client:
+        assert run_batch(client, ["10", "11", "12"], "owner/repo") == 1
+    assert batch_remote.events == [("preview", 10), ("confirm", 10), ("preview", 11)]
+    output = capsys.readouterr().out
+    assert "not processed" in output and "Earlier accepted requests remain submitted" in output
+
+
+def test_batch_interrupt_during_confirm_keeps_uncertainty_and_request_id(batch_remote, capsys):
+    batch_remote.scenarios[11] = "confirm_interrupt"
+    with httpx.Client(
+        base_url="https://example.test", transport=httpx.MockTransport(batch_remote)
+    ) as client:
+        assert run_batch(client, ["10", "11", "12"], "owner/repo") == 2
+    assert batch_remote.events == [
+        ("preview", 10),
+        ("confirm", 10),
+        ("preview", 11),
+        ("confirm", 11),
+    ]
+    output = capsys.readouterr().out
+    assert "needs inspection" in output and "not processed" in output
+    assert f"pr-rerun status {batch_remote.request_id(11)}" in output
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["10", "11", "12", "--repo", "demo"],
+        ["--repo", "demo", "10", "11", "12"],
+        ["10", "--repo", "demo", "11", "12"],
+    ],
+)
+def test_batch_cli_parses_numbers_and_options_and_resolves_alias_once(
+    batch_remote, monkeypatch, arguments
+):
+    monkeypatch.setenv("PR_RERUN_ACCESS_TOKEN", "prr_" + "a" * 43)
+    monkeypatch.setenv("PR_RERUN_URL", "https://example.test")
+    monkeypatch.delenv("PR_RERUN_NETBIRD_URL", raising=False)
+    monkeypatch.setattr("sys.argv", ["pr-rerun", *arguments])
+    original = httpx.Client
+    monkeypatch.setattr(
+        "pr_rerun.cli.httpx.Client",
+        lambda **kwargs: original(transport=httpx.MockTransport(batch_remote), **kwargs),
+    )
+    with pytest.raises(SystemExit) as result:
+        main()
+    assert result.value.code == 0
+    assert batch_remote.alias_lookups == 1
+    assert batch_remote.events == [
+        ("preview", 10),
+        ("confirm", 10),
+        ("preview", 11),
+        ("confirm", 11),
+        ("preview", 12),
+        ("confirm", 12),
+    ]
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["0", "10"],
+        ["10", "0", "12"],
+        ["10", "-1"],
+        ["10", "11", "oops"],
+        ["10", "1.5"],
+        ["10", "12345678901"],
+        ["10", "--repo", "demo", "login"],
+        *[
+            [name, "10", "11"]
+            for name in ("login", "logout", "repos", "stats", "errors", "error", "policy", "status")
+        ],
+    ],
+)
+def test_invalid_batch_arguments_fail_before_credentials_or_requests(monkeypatch, arguments):
+    monkeypatch.setattr("sys.argv", ["pr-rerun", *arguments])
+    monkeypatch.setattr(
+        "pr_rerun.cli.load_login", lambda: pytest.fail("Read credentials for invalid input")
+    )
+    with pytest.raises(SystemExit) as result:
+        main()
+    assert result.value.code == 2
+
+
+def test_batch_noninteractive_input_never_submits(batch_remote, monkeypatch):
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    with httpx.Client(
+        base_url="https://example.test", transport=httpx.MockTransport(batch_remote)
+    ) as client:
+        with pytest.raises(ValueError, match="interactive"):
+            run_batch(client, ["10", "11"], "owner/repo")
+    assert not batch_remote.events

@@ -6,7 +6,7 @@ An administrator runs one server; users log in through GitHub once, then use
 
 English | [中文](README.zh-CN.md)
 
-Current version: **0.7.1**. Use GitHub App mode for per-repository authorization
+Current version: **0.8.0**. Use GitHub App mode for per-repository authorization
 and policies without manually distributing tokens. Legacy single-repository
 `gh`/token deployments remain supported.
 
@@ -85,6 +85,7 @@ pr-rerun login --netbird-server http://100.64.0.10:8080 --repo pypto
 
 # Subsequent invocations, including in new terminals:
 pr-rerun 123
+pr-rerun 10 11 12 --repo simpler
 pr-rerun 456 --repo another/project
 pr-rerun repos
 # Optional: clear this user's saved login
@@ -102,6 +103,17 @@ failed runs means no confirmation prompt. `accepted` means GitHub accepted the
 request, not that CI passed. Use the Actions link to follow the run, or
 `pr-rerun status rr_REQUEST_ID` to inspect the service submission state. Use
 `pr-rerun 123 --verbose` to show excluded runs when troubleshooting.
+
+Client 0.8.0+ accepts multiple PR numbers in one repository, such as
+`pr-rerun 10 11 12 --repo simpler`. Each PR is independently previewed and requires
+its own `y` confirmation. Enter or `n` skips that PR; Ctrl-C or EOF stops the
+remaining PRs. Duplicates are removed in input order, and all numbers are validated
+before credentials or requests. Ineligible PRs and request errors are reported
+while the batch continues. A final table includes each result and request ID.
+A lost/interrupted confirmation is never retried automatically; inspect its ID.
+Exit 0 means all unique PRs were accepted; 1 means a decline or interruption;
+2 means an error, ineligible PR, partial submission or uncertain confirmation.
+Existing server versions need no update; repository limits still apply per PR.
 
 Login saves the origin and token in `~/.config/pr-rerun/client.json` (or under
 `XDG_CONFIG_HOME`) with directory/file modes `0700`/`0600`. It checks authentication
