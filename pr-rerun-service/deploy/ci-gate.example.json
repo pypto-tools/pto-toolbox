@@ -1,0 +1,13 @@
+{
+  "repositories": [
+    {
+      "repository": "team/project",
+      "repository_id": 123456,
+      "installation_id": 654321,
+      "workflow": ".github/workflows/ci-app-gate-prototype.yml",
+      "base_branch": "ci-app-gate-sandbox",
+      "environment": "ci-full",
+      "lint_jobs": ["lint", "clang-tidy"]
+    }
+  ]
+}

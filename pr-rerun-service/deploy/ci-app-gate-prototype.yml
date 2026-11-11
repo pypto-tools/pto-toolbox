@@ -1,0 +1,72 @@
+# Install on the fork's ci-app-gate-sandbox base branch only after configuring
+# the ci-full environment with this App's custom deployment protection rule.
+name: CI App gate prototype
+run-name: 'CI gate PR #${{ github.event.pull_request.number }} @${{ github.event.pull_request.head.sha }} base:${{ github.event.pull_request.base.sha }}'
+
+on:
+  pull_request:
+    branches: [ci-app-gate-sandbox]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-app-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    if: github.repository == 'luohuan19/pypto'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'Lightweight lint fixture passed'
+
+  clang-tidy:
+    if: github.repository == 'luohuan19/pypto'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'Lightweight clang-tidy fixture passed'
+
+  full-gate:
+    needs: [lint, clang-tidy]
+    environment: ci-full
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'The App approved this environment in the original run'
+
+  unit-tests:
+    needs: full-gate
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'Lightweight unit-test fixture passed'
+
+  system-tests:
+    needs: full-gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Exercise failed-job reruns without NPU hardware
+        env:
+          FAIL_ONCE: ${{ contains(github.event.pull_request.title, '[fail-once]') }}
+        run: |
+          if [ "$FAIL_ONCE" = true ] && [ "$GITHUB_RUN_ATTEMPT" = 1 ]; then
+            echo 'Intentional first-attempt failure'
+            exit 1
+          fi
+          echo 'Lightweight system-test fixture passed'
+
+  full-result:
+    name: ci/full
+    if: always()
+    needs: [lint, clang-tidy, full-gate, unit-tests, system-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          results = json.loads(os.environ['RESULTS'])
+          assert all(job['result'] == 'success' for job in results.values()), results
+          PY

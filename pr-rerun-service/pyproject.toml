@@ -24,6 +24,7 @@ dev = ["pytest>=8,<9", "ruff==0.14.8", "pyright==1.1.407", "build>=1,<2"]
 pr-rerun = "pr_rerun.cli:main"
 pr-rerun-admin = "pr_rerun.admin:main"
 pr-rerun-server = "pr_rerun.api:main"
+pr-ci-gate-server = "pr_rerun.ci_gate:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

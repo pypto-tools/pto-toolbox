@@ -7,6 +7,9 @@ single-repository and retain their existing configuration, database and logins.
 App mode requires Linux and OpenSSL (RSA signing); it does not require public
 inbound access, OAuth callbacks or webhooks. Client connections still use NetBird.
 
+This describes the rerun API. The optional [comment CI gate](ci-gate.md) reuses
+the App but adds a separate signed-webhook listener and environment permission.
+
 ## Design and authority
 
 The platform operator controls the App key and initial repository enrollment.
