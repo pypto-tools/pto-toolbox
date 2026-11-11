@@ -1,0 +1,28 @@
+# Example only. Adapt paths and run beside the existing private rerun service.
+[Unit]
+Description=GitHub App comment approval for CI environments
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=exec
+User=rerun
+Group=rerun
+WorkingDirectory=/opt/pr-rerun-service
+Environment=PR_RERUN_APP_ID=123456
+Environment=PR_RERUN_APP_PRIVATE_KEY_FILE=/home/rerun/.config/pr-rerun/app.pem
+ExecStart=/opt/pr-rerun-service/.venv/bin/python -I -m pr_rerun.ci_gate --config /etc/pr-ci-gate/policy.json --database /var/lib/pr-ci-gate/gate.sqlite --secret-file /etc/pr-ci-gate/webhook-secret --port 8082
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=120
+StateDirectory=pr-ci-gate
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pr-ci-gate
+
+[Install]
+WantedBy=multi-user.target

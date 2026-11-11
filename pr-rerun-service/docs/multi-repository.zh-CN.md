@@ -6,6 +6,9 @@
 登录兼容。App 模式需要 Linux、用于 RSA 签名的 OpenSSL，以及访问 GitHub 的网络；
 不需要公网入口、OAuth 回调或 Webhook，客户端仍通过 NetBird 连接。
 
+这里描述的是 rerun API。可选的[评论 CI 门禁](ci-gate.zh-CN.md)复用 App，
+另外增加独立的签名 webhook 接收进程和 environment 批准权限。
+
 ## 权限与规则设计
 
 平台管理员保管 App 私钥、首次接入仓库并指定仓库管理员。组织所有者安装 App 时
