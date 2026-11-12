@@ -6,7 +6,7 @@ An administrator runs one server; users log in through GitHub once, then use
 
 English | [中文](README.zh-CN.md)
 
-Current version: **0.8.1**. Use GitHub App mode for per-repository authorization
+Current version: **0.9.0**. Use GitHub App mode for per-repository authorization
 and policies without manually distributing tokens. Legacy single-repository
 `gh`/token deployments remain supported.
 
@@ -17,6 +17,8 @@ and policies without manually distributing tokens. Legacy single-repository
 | Register an App, enroll repositories and manage policies | [App and repository policies](docs/multi-repository.md) |
 | Upgrade the server, check status and troubleshoot | [Operations](docs/operations.md) |
 | Legacy deployment, attribution and request-result semantics | [Legacy mode and protocol guide](docs/README.md) |
+
+Server 0.9.0 adds opt-in [PR comment commands](docs/comment-commands.md): the PR author can post `/ci rerun` to request the same verified reruns. No CLI login or bot replies are required.
 
 Server 0.8.1 supports PyPTO comment-triggered **CI Full**, with an explicit
 [`pypto_ci` repository policy](docs/multi-repository.md#pypto-comment-triggered-full-ci-server-081).

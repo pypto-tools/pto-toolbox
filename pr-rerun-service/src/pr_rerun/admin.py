@@ -83,6 +83,9 @@ def main() -> None:
     revoke = commands.add_parser("revoke", help="Revoke a user's token by immutable GitHub user ID")
     revoke.add_argument("github_id", type=int)
     commands.add_parser("users", help="List identities without token hashes or credentials")
+    comments = commands.add_parser("comment-commands", help="Inspect recent webhook commands")
+    comments.add_argument("--repo", required=True, type=repository_name)
+    comments.add_argument("--limit", type=int, choices=range(1, 101), default=20)
     installations = commands.add_parser(
         "installations", help="Compare GitHub App repository access with service enrollment"
     )
@@ -155,7 +158,23 @@ def main() -> None:
                 )
             return
         store = Store(Path(database))
-        if args.command == "users":
+        if args.command == "comment-commands":
+            with store.connection() as db:
+                exists = db.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='comment_commands'"
+                ).fetchone()
+                rows = (
+                    db.execute(
+                        "SELECT id, repository, pr, comment_id, actor, login, received, state, "
+                        "request_id, message FROM comment_commands WHERE repository=? "
+                        "ORDER BY id DESC LIMIT ?",
+                        (args.repo, args.limit),
+                    ).fetchall()
+                    if exists
+                    else []
+                )
+            print(json.dumps([dict(row) for row in rows], indent=2))
+        elif args.command == "users":
             print(json.dumps(store.users(), indent=2))
         elif args.command == "service-admin":
             if args.action == "list":

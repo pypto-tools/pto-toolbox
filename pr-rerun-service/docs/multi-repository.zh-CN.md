@@ -415,3 +415,7 @@ pr-rerun alias list --official
 
 升级前备份数据库。规则写入这些字段后，旧版严格校验器无法读取新规则；降级前需制定
 兼容迁移或恢复对应备份，不能直接把运行代码切回 0.4.1。
+
+## PR 评论命令（服务端 0.9.0）
+
+`comment_reruns_enabled` 默认 `false`。升级所有读取仓库规则的进程、配置签名 Webhook 后，再设为 `true`。PR 作者新发布且未编辑的 `/ci rerun` 评论可用于验证身份；仓库访问、workflow、分支和使用限制仍然有效。参见[部署和审计指南](comment-commands.zh-CN.md)。

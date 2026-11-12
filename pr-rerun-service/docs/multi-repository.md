@@ -495,3 +495,7 @@ not automatically grant access to repository-wide metadata. See [CI statistics](
 Back up the database before upgrading. Once policies contain these fields, older
 strict validators cannot read them. Downgrading requires a compatible migration
 or the matching database backup; do not simply switch code back to 0.4.1.
+
+## PR comment commands (server 0.9.0)
+
+`comment_reruns_enabled` defaults to `false`. Set it to `true` only after upgrading all policy-reading processes and configuring signed Webhook delivery. A new, unedited `/ci rerun` comment authenticates the PR author; existing repository access, workflow, branch and usage rules still apply. See the [deployment and audit guide](comment-commands.md).

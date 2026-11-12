@@ -1,0 +1,40 @@
+# Standalone ingress behind a TLS reverse proxy. Replace only the NetBird address.
+worker_processes 1;
+pid /tmp/nginx.pid;
+error_log /dev/stderr warn;
+events { worker_connections 128; }
+http {
+    access_log off;
+    client_body_temp_path /tmp/client-body;
+    proxy_temp_path /tmp/proxy;
+    fastcgi_temp_path /tmp/fastcgi;
+    uwsgi_temp_path /tmp/uwsgi;
+    scgi_temp_path /tmp/scgi;
+    client_max_body_size 256k;
+    client_header_timeout 5s;
+    client_body_timeout 10s;
+    keepalive_timeout 5s;
+    limit_req_zone $binary_remote_addr zone=webhooks:1m rate=10r/s;
+    server {
+        listen 8080;
+        server_name _;
+        location = /github/webhook {
+            if ($request_method != POST) { return 405; }
+            if ($args != "") { return 404; }
+            limit_req zone=webhooks burst=20 nodelay;
+            limit_req_status 429;
+            proxy_connect_timeout 3s;
+            proxy_send_timeout 5s;
+            proxy_read_timeout 8s;
+            proxy_next_upstream off;
+            proxy_pass http://100.64.0.10:8080;
+            proxy_set_header Host "100.64.0.10:8080";
+            proxy_set_header Authorization "";
+            proxy_set_header Cookie "";
+            proxy_set_header X-Forwarded-For "";
+            proxy_set_header X-Forwarded-Proto "";
+            proxy_set_header X-Real-IP "";
+        }
+        location / { return 404; }
+    }
+}

@@ -66,6 +66,7 @@ class Settings(StrictModel):
     app_id: int | None = Field(default=None, gt=0)
     app_client_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_.-]{1,100}$")
     app_key_file: Path | None = Field(default=None, repr=False)
+    webhook_secret_file: Path | None = Field(default=None, repr=False)
     login_proxy: SecretStr | None = Field(default=None, repr=False)
     policy_revision: int = Field(default=0, ge=0)
     repository_id: int | None = Field(default=None, gt=0)
@@ -125,6 +126,11 @@ class Settings(StrictModel):
                     else None
                 ),
                 app_key_file=Path(key_file),
+                webhook_secret_file=(
+                    Path(os.environ["PR_RERUN_WEBHOOK_SECRET_FILE"])
+                    if os.environ.get("PR_RERUN_WEBHOOK_SECRET_FILE")
+                    else None
+                ),
             )
         token = github_credential(github_auth)
         return cls(database=Path(database), github_token=SecretStr(token), **data)

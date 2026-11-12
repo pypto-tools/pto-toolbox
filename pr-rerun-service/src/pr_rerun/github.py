@@ -99,6 +99,7 @@ class GitHub:
             r"|actions/artifacts/[1-9][0-9]*/zip)"
             rf"|{re.escape(self.prefix)}/git/commits/[0-9a-f]{{40}}"
             rf"|{re.escape(self.prefix)}/git/ref/pull/[1-9][0-9]*/merge"
+            rf"|{re.escape(self.prefix)}/issues/comments/[1-9][0-9]*"
             rf"|{re.escape(self.prefix)}/actions/workflows/ci(?:-full)?\.yml"
             r"(?:/runs\?event=workflow_dispatch&branch=main&created="
             r"[0-9TZ.%A-F-]+&per_page=100&page=[1-9][0-9]*)?"
@@ -190,6 +191,9 @@ class GitHub:
 
     def run(self, run_id: int) -> dict:
         return self._json(f"{self.prefix}/actions/runs/{positive_id(run_id)}")
+
+    def comment(self, comment_id: int) -> dict:
+        return self._json(f"{self.prefix}/issues/comments/{positive_id(comment_id)}")
 
     def full_workflow(self, path: str) -> dict:
         if path not in FULL_PATHS:

@@ -72,6 +72,8 @@ class RequestBoundary:
                 )
                 return
             limit = 65536 if scope["path"].startswith("/api/repositories/") else BODY_LIMIT
+            if scope["path"] == "/github/webhook":
+                limit = 256 * 1024
             body = bytearray()
             while True:
                 message = await receive()
@@ -130,6 +132,13 @@ def create_app(
         if settings.app_id and settings.app_client_id
         else None
     )
+    commands = None
+    if settings.webhook_secret_file is not None:
+        if not isinstance(service, Registry):
+            raise ValueError("GitHub webhooks require App mode")
+        from pr_rerun.webhooks import CommentCommands, read_secret
+
+        commands = CommentCommands(service, read_secret(settings.webhook_secret_file))
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -142,8 +151,12 @@ def create_app(
             except BlockingIOError as error:
                 raise RuntimeError("Another server is already using this database") from error
             store.recover()
+            if commands is not None:
+                commands.start()
             yield
         finally:
+            if commands is not None:
+                commands.close()
             os.close(descriptor)
             close()
             if login is not None:
@@ -159,6 +172,20 @@ def create_app(
     app.add_middleware(RequestBoundary)
     app.state.service = service
     app.state.close = close
+    app.state.comment_commands = commands
+
+    @app.post("/github/webhook")
+    async def webhook(request: Request):
+        if commands is None:
+            raise ServiceError(404, "Webhook commands are not configured.")
+        body = await request.body()
+        return await run_in_threadpool(
+            commands.receive,
+            body,
+            request.headers.get("x-hub-signature-256", ""),
+            request.headers.get("x-github-event", ""),
+            request.headers.get("x-github-delivery", ""),
+        )
 
     def principal(authorization: Annotated[str, Header()] = "") -> Principal:
         return store.authenticate(authorization)

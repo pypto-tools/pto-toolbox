@@ -5,7 +5,7 @@
 
 [English](README.md) | 中文
 
-当前版本 **0.8.1**。推荐 GitHub App 模式：每仓库单独授权、独立规则，
+当前版本 **0.9.0**。推荐 GitHub App 模式：每仓库单独授权、独立规则，
 无需人工分发令牌。旧的 `gh`/Token 单仓库模式继续兼容。
 
 | 需要做什么 | 文档 |
@@ -15,6 +15,8 @@
 | 注册 App、接入仓库、管理规则 | [多仓库与 App 指南](docs/multi-repository.zh-CN.md) |
 | 升级服务、检查状态、排查故障 | [运维与排障](docs/operations.zh-CN.md) |
 | 旧单仓库部署、归属校验和请求结果语义 | [旧模式及协议说明](docs/README.zh-CN.md) |
+
+服务端 0.9.0 增加可按仓库开启的 [PR 评论命令](docs/comment-commands.zh-CN.md)：PR 作者发表评论 `/ci rerun`，即可请求已通过身份校验的重跑。无需先登录客户端，机器人不会回复评论。
 
 服务端 0.8.1 支持 PyPTO 评论触发的 **CI Full**，需要显式配置
 [`pypto_ci` 仓库规则](docs/multi-repository.zh-CN.md#pypto-评论触发的-full-ci服务端-081)。

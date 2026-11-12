@@ -27,6 +27,7 @@ class RepositoryPolicy(StrictModel):
     users: list[UserID] = Field(default_factory=list, max_length=1000)
     access: Literal["explicit_users", "authenticated_users"] = "explicit_users"
     aliases: list[AliasName] = Field(default_factory=list, max_length=20)
+    comment_reruns_enabled: bool = False
     analytics_enabled: bool = False
     analytics_access: Literal["maintainers", "repository_users"] = "maintainers"
     error_logs_enabled: bool = False
