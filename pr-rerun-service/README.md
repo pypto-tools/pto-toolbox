@@ -6,7 +6,7 @@ An administrator runs one server; users log in through GitHub once, then use
 
 English | [中文](README.zh-CN.md)
 
-Current version: **0.8.0**. Use GitHub App mode for per-repository authorization
+Current version: **0.8.1**. Use GitHub App mode for per-repository authorization
 and policies without manually distributing tokens. Legacy single-repository
 `gh`/token deployments remain supported.
 
@@ -17,6 +17,10 @@ and policies without manually distributing tokens. Legacy single-repository
 | Register an App, enroll repositories and manage policies | [App and repository policies](docs/multi-repository.md) |
 | Upgrade the server, check status and troubleshoot | [Operations](docs/operations.md) |
 | Legacy deployment, attribution and request-result semantics | [Legacy mode and protocol guide](docs/README.md) |
+
+Server 0.8.1 supports PyPTO comment-triggered **CI Full**, with an explicit
+[`pypto_ci` repository policy](docs/multi-repository.md#pypto-comment-triggered-full-ci-server-081).
+Upgrade the API and collectors before enabling it.
 
 ## Behavior
 
@@ -119,7 +123,6 @@ Login saves the origin and token in `~/.config/pr-rerun/client.json` (or under
 `XDG_CONFIG_HOME`) with directory/file modes `0700`/`0600`. It checks authentication
 without creating a rerun. A saved token is only reused for its original server.
 One OS account stores one login; contributors sharing an OS account share that login.
-
 
 ## AI analysis over MCP (0.7.0)
 

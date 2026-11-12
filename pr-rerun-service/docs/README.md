@@ -25,6 +25,10 @@ For 0.3.0 App authentication and per-repository policy management, follow the
 [multi-repository guide](multi-repository.md). The setup below describes legacy
 single-repository `gh`/token mode.
 
+Server 0.8.1 also supports PyPTO trusted `main` dispatches for Full CI through an
+explicit [`pypto_ci` policy](multi-repository.md#pypto-comment-triggered-full-ci-server-081).
+The ordinary `pull_request` strategy does not accept generic dispatches.
+
 ## Behavior
 
 1. The contributor enters a PR number.

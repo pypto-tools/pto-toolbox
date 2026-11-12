@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from fnmatch import fnmatchcase
 
+from pr_rerun.full_ci import full_target
 from pr_rerun.github import GitHub
 from pr_rerun.models import (
     Plan,
@@ -39,6 +40,9 @@ class Planner:
         self.github = github
         self.settings = settings
         self.rules = {rule.path: rule for rule in settings.workflows}
+        self.full_paths = sorted(
+            rule.path for rule in settings.workflows if rule.identity == "pypto_ci"
+        )
 
     def pull(self, principal: Principal, number: int) -> PullRequest:
         if self.authorize is not None:
@@ -76,6 +80,12 @@ class Planner:
             head_repository_id=positive_id(pr["head"]["repo"]["id"]),
             head_ref=pr["head"]["ref"],
             base_ref=pr["base"]["ref"],
+            base_sha=pr["base"].get("sha") if self.full_paths else None,
+            # The PR endpoint may omit merge_commit_sha for installation tokens.
+            # Resolve GitHub's merge ref and independently verify its parents.
+            merge_sha=self.github.merge_ref(number)
+            if self.full_paths and pr["base"]["ref"] == "main"
+            else None,
             draft=pr["draft"],
             url=f"https://github.com/{self.settings.repository}/pull/{number}",
         )
@@ -109,6 +119,33 @@ class Planner:
                     "base_ref": pr.base_ref,
                 }.items()
             )
+        if rule.identity == "pypto_ci":
+            if run["event"] == "workflow_dispatch":
+                if (
+                    full_target(run) != (pr.number, pr.head_sha, pr.base_sha)
+                    or pr.base_ref != "main"
+                    or not pr.base_sha
+                    or not pr.merge_sha
+                    or run.get("head_branch") != "main"
+                    or (run.get("head_repository") or {}).get("id") != pr.repository_id
+                ):
+                    return False
+                workflow = self.github.full_workflow(rule.path)
+                if (
+                    workflow.get("id") != run.get("workflow_id")
+                    or workflow.get("path") != rule.path
+                    or workflow.get("state") != "active"
+                ):
+                    return False
+                # The trusted controller validates the immutable dispatch merge
+                # before any tests. Revalidate today's merge too: failed-job
+                # reruns can reuse a successful `changes` job from attempt 1.
+                merge = self.github.merge_commit(pr.merge_sha)
+                return merge.get("sha") == pr.merge_sha and [
+                    parent.get("sha") for parent in merge.get("parents", [])
+                ] == [pr.base_sha, pr.head_sha]
+            if rule.path != ".github/workflows/ci.yml":
+                return False
         if run["event"] != "pull_request":
             return False
         links = run.get("pull_requests")
@@ -164,12 +201,17 @@ class Planner:
     def build(self, principal: Principal, number: int) -> Plan:
         started = time.monotonic()
         pr = self.pull(principal, number)
-        latest: dict[str, dict] = {}
+        latest: dict[tuple[str, str], dict] = {}
         skipped = []
         # Only this build shares branch history. Confirmation and the final
         # per-run check must obtain new evidence rather than reuse preview data.
         branch_cache: dict[str, list[dict]] = {}
         branch_lock = threading.Lock()
+        full = (
+            self.github.latest_full_run(self.full_paths, number, pr.head_sha)
+            if self.full_paths
+            else None
+        )
 
         def branch_history(head: str) -> list[dict]:
             with branch_lock:
@@ -185,11 +227,22 @@ class Planner:
             rule = self.rules.get(path)
             if rule is None:
                 return run, f"Run {run_id}: workflow is not allowed."
+            if rule.identity == "pypto_ci" and run["event"] == "workflow_dispatch":
+                if full is None or run_id != full["id"]:
+                    return run, f"Run {run_id}: superseded Full CI request."
             if not self.matches(run, pr, rule, branch_lookup=branch_history):
+                if rule.identity == "pypto_ci" and run["event"] == "workflow_dispatch":
+                    return (
+                        run,
+                        f"Run {run_id}: Full CI target is stale or unverified; "
+                        "request /ci full on the current PR.",
+                    )
                 return run, f"Run {run_id}: PR ownership could not be verified."
             return run, None
 
         run_ids = self.github.checked_runs(number, pr.head_sha)
+        if full is not None and full["id"] not in run_ids:
+            run_ids.append(positive_id(full["id"]))
         executor = ThreadPoolExecutor(max_workers=LOOKUP_WORKERS)
         try:
             # map preserves input order, including deterministic exclusions and
@@ -201,13 +254,14 @@ class Planner:
                 path = run["path"].split("@", 1)[0]
                 # Choose the newest run BEFORE filtering by failure. An older failed
                 # run must not be resurrected after a new success or active run.
-                if path not in latest or run["run_number"] > latest[path]["run_number"]:
-                    latest[path] = run
+                key = (path, run["event"])
+                if key not in latest or run["run_number"] > latest[key]["run_number"]:
+                    latest[key] = run
         finally:
             executor.shutdown(wait=True, cancel_futures=True)
         cutoff = datetime.now(timezone.utc) - timedelta(days=30)
         selected = []
-        for path, run in sorted(latest.items()):
+        for (path, _event), run in sorted(latest.items()):
             run_id, attempt = positive_id(run["id"]), positive_id(run["run_attempt"])
             created = datetime.fromisoformat(run["created_at"].replace("Z", "+00:00"))
             if created.tzinfo is None:
@@ -268,6 +322,14 @@ class Planner:
         current = self.github.run(run.run_id)
         rule = self.rules.get(run.workflow)
         if (
+            rule is not None
+            and rule.identity == "pypto_ci"
+            and current["event"] == "workflow_dispatch"
+        ):
+            latest = self.github.latest_full_run(self.full_paths, plan.pr.number, plan.pr.head_sha)
+            if latest is None or latest["id"] != run.run_id:
+                raise ServiceError(409, "Full CI request was superseded after confirmation.")
+        if (
             rule is None
             or rule.mode != run.mode
             or current["id"] != run.run_id
@@ -287,3 +349,5 @@ class Planner:
             or cancelled != run.cancelled_jobs
         ):
             raise ServiceError(409, "Failed or cancelled jobs changed after confirmation.")
+        if rule.identity == "pypto_ci" and self.pull(principal, plan.pr.number) != plan.pr:
+            raise ServiceError(409, "PR changed during final Full CI validation.")

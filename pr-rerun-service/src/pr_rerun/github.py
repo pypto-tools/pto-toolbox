@@ -5,11 +5,13 @@ import json
 import re
 import zipfile
 from collections.abc import Callable, Iterator
+from datetime import datetime, timedelta, timezone
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 import httpx
 
+from pr_rerun.full_ci import FULL_PATHS, full_target, run_order
 from pr_rerun.models import Mode, ServiceError, UpstreamError, positive_id
 
 API = "https://api.github.com"
@@ -95,6 +97,11 @@ class GitHub:
             r"(/artifacts\?per_page=100&page=[1-9][0-9]*"
             r"|/attempts/[1-9][0-9]*/jobs\?per_page=100&page=[1-9][0-9]*)?"
             r"|actions/artifacts/[1-9][0-9]*/zip)"
+            rf"|{re.escape(self.prefix)}/git/commits/[0-9a-f]{{40}}"
+            rf"|{re.escape(self.prefix)}/git/ref/pull/[1-9][0-9]*/merge"
+            rf"|{re.escape(self.prefix)}/actions/workflows/ci(?:-full)?\.yml"
+            r"(?:/runs\?event=workflow_dispatch&branch=main&created="
+            r"[0-9TZ.%A-F-]+&per_page=100&page=[1-9][0-9]*)?"
             r"|/users/[A-Za-z0-9][A-Za-z0-9-]{0,38}"
         )
         allowed_write = rf"{re.escape(self.prefix)}/actions/runs/[1-9][0-9]*/rerun(-failed-jobs)?"
@@ -142,6 +149,10 @@ class GitHub:
                 "GitHub connection failed. The request may need inspection.", uncertain=write
             ) from error
         expected = {201} if write else {200, 302}
+        if method == "GET" and re.fullmatch(
+            rf"{re.escape(self.prefix)}/git/ref/pull/[1-9][0-9]*/merge", path
+        ):
+            expected.add(404)  # Conflicting PRs may not have a current merge ref.
         if result.status_code not in expected:
             # Do not relay upstream bodies, URLs containing signed tokens, or credentials.
             raise UpstreamError(
@@ -179,6 +190,109 @@ class GitHub:
 
     def run(self, run_id: int) -> dict:
         return self._json(f"{self.prefix}/actions/runs/{positive_id(run_id)}")
+
+    def full_workflow(self, path: str) -> dict:
+        if path not in FULL_PATHS:
+            raise ServiceError(400, "Unsupported Full CI workflow.")
+        return self._json(f"{self.prefix}/actions/workflows/{path.rsplit('/', 1)[1]}")
+
+    def merge_commit(self, sha: str) -> dict:
+        if not re.fullmatch(r"[0-9a-f]{40}", sha):
+            raise ServiceError(409, "PR merge revision is unavailable; request another preview.")
+        return self._json(f"{self.prefix}/git/commits/{sha}")
+
+    def merge_ref(self, number: int) -> str | None:
+        number = positive_id(number)
+        response = self._request("GET", f"{self.prefix}/git/ref/pull/{number}/merge")
+        if response.status_code == 404:
+            return None
+        try:
+            ref = response.json()
+            sha = ref["object"]["sha"]
+            if (
+                response.status_code != 200
+                or ref["ref"] != f"refs/pull/{number}/merge"
+                or ref["object"]["type"] != "commit"
+                or not isinstance(sha, str)
+                or not re.fullmatch(r"[0-9a-f]{40}", sha)
+            ):
+                raise ValueError("Invalid merge ref")
+            return sha
+        except (KeyError, TypeError, ValueError) as error:
+            raise UpstreamError("Unable to verify the PR merge ref.") from error
+
+    def latest_full_run(self, paths: list[str], number: int, head: str) -> dict | None:
+        """Find the latest request independently of mirrored checks/statuses.
+
+        GitHub caps filtered listings at 1,000 runs. Split dense time windows
+        instead of silently choosing from a truncated history. A bounded failure
+        aborts the preview, never falling back to an older failed run.
+        """
+        if any(path not in FULL_PATHS for path in paths):
+            raise ServiceError(400, "Unsupported Full CI workflow.")
+        number = positive_id(number)
+        end = datetime.now(timezone.utc).replace(microsecond=0)
+        start = end - timedelta(days=30)
+        remaining = MAX_PAGES
+        candidates: dict[int, dict] = {}
+
+        def collect(path: str, lower: datetime, upper: datetime) -> None:
+            nonlocal remaining
+            seen: set[int] = set()
+            expected = None
+            for page in range(1, 11):
+                remaining -= 1
+                if remaining < 0:
+                    raise UpstreamError("Full CI history exceeded the lookup limit.")
+                window = f"{lower:%Y-%m-%dT%H:%M:%SZ}..{upper:%Y-%m-%dT%H:%M:%SZ}"
+                query = urlencode(
+                    {
+                        "event": "workflow_dispatch",
+                        "branch": "main",
+                        "created": window,
+                        "per_page": 100,
+                        "page": page,
+                    }
+                )
+                response = self._json(
+                    f"{self.prefix}/actions/workflows/{path.rsplit('/', 1)[1]}/runs?{query}"
+                )
+                count, batch = response.get("total_count"), response.get("workflow_runs")
+                if (
+                    type(count) is not int
+                    or count < 0
+                    or not isinstance(batch, list)
+                    or len(batch) > 100
+                ):
+                    raise UpstreamError("Invalid Full CI history page.")
+                if expected is not None and count != expected:
+                    raise UpstreamError("Full CI history changed; request another preview.")
+                expected = count
+                if count >= 1000:
+                    if upper <= lower:
+                        raise UpstreamError("Full CI history is too dense to verify.")
+                    middle = lower + timedelta(seconds=int((upper - lower).total_seconds()) // 2)
+                    collect(path, lower, middle)
+                    collect(path, middle + timedelta(seconds=1), upper)
+                    return
+                for run in batch:
+                    run_id = positive_id(run["id"])
+                    created, _ = run_order(run)
+                    if run_id in seen or not lower <= created <= upper:
+                        raise UpstreamError("Full CI history changed; request another preview.")
+                    seen.add(run_id)
+                    target = full_target(run)
+                    if target is not None and target[:2] == (number, head):
+                        candidates[run_id] = run
+                if len(batch) < 100:
+                    if len(seen) != count:
+                        raise UpstreamError("Incomplete Full CI history; nothing was selected.")
+                    return
+            raise UpstreamError("Incomplete Full CI history; nothing was selected.")
+
+        for path in paths:
+            collect(path, start, end)
+        return max(candidates.values(), key=run_order, default=None)
 
     def head_pull_requests(self, head: str) -> list[dict]:
         """Read every PR for this ref, in every state, before deciding uniqueness."""

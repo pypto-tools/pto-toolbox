@@ -7,6 +7,21 @@ This guide covers the 0.4.1 App deployment. For initial setup and enrollment see
 offline updates and rollback see [client releases](client-releases.md).
 All addresses, paths and account names in these guides are examples.
 
+## Upgrading for PyPTO Full CI (0.8.1)
+
+Prepare the 0.8.1 wheel and update the API, admin launcher and both collection
+services to use it before applying the [`pypto_ci` policy](multi-repository.md#pypto-comment-triggered-full-ci-server-081).
+Collectors also parse repository policies; an older collector will reject the new
+identity value. Pause collection while switching all processes, back up the database,
+then restart the API, apply the policy using its current revision and resume timers.
+Preserve existing collection budgets, intervals, login state and NetBird bindings.
+Client updates are optional for this backend change.
+
+For rollback, restore the previous policy through the new server before returning
+the API/admin/collectors to old code. Keep the old wheel and policy snapshot; do not
+run old code against a policy containing `pypto_ci`, or restore an old whole database
+without considering sessions and audit records created since the backup.
+
 ## What runs where
 
 | Component | Location | Updates |

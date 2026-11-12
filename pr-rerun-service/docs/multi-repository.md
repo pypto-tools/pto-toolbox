@@ -38,7 +38,7 @@ Pending workflow approvals are not approved by this service.
 
 Policies are strict JSON data, not scripts, shell commands, API URLs or credentials.
 PR branch files cannot change policy. Active workflow paths are checked against
-GitHub at enrollment and policy updates. Ordinary workflows must use the
+GitHub at enrollment and policy updates. Ordinary workflows use the
 `pull_request` identity strategy and `failed` mode. The only `all` exception is
 `codex_manifest`, which requires a compatible trusted `pull_request_target`
 workflow that produces the identity artifact described in the operator guide.
@@ -68,6 +68,52 @@ rejected upstream. A deduplicated retry does not consume a second slot. The acti
 limit bounds submissions that are validating/submitting or have uncertain outcomes;
 it does not count all running CI jobs. Reconcile uncertain outcomes with `status`
 before retrying. The existing one-attempt claim still prevents duplicate reruns.
+
+### PyPTO comment-triggered Full CI (server 0.8.1)
+
+For repositories running PyPTO's trusted `ci_control.py` contract, explicitly enable
+`pypto_ci` on both workflow paths. Use this `workflows` array in the existing policy,
+retaining its other fields and current `expected_revision`:
+
+```json
+[
+  {"path": ".github/workflows/ci.yml", "mode": "failed", "identity": "pypto_ci"},
+  {"path": ".github/workflows/ci-full.yml", "mode": "failed", "identity": "pypto_ci"},
+  {"path": ".github/workflows/codex-review.yml", "mode": "all", "identity": "codex_manifest"}
+]
+```
+
+`ci.yml` retains ordinary PR lint attribution. Full CI uses `workflow_dispatch`
+on trusted `main` with the title `CI full PR #NUMBER @HEAD base:BASE` and a
+controller that validates immutable PR head/base/merge inputs before tests.
+The service reads the allowed workflows' recent dispatch history, independently
+of mirrored job checks and `ci/full` statuses. It verifies repository and workflow
+IDs, event, source repository, `main` branch, current PR author/head/base and the
+current merge commit's ordered base/head parents. A title alone is insufficient.
+Do not enable this adapter on unrelated workflows that merely copy the title.
+
+The newest Full CI request wins across both paths, ordered by creation time and
+run ID, even if an older attempt was rerun later. A successful, active, awaiting
+approval or stale latest request never revives an older failure. Completed failed,
+timed-out and cancelled jobs use `rerun failed`. Confirmation repeats identity and
+latest-request checks. If the target is stale, post `/ci full` on the PR to create
+a new test request. This service cannot create that request or approve a workflow.
+
+Discovery covers GitHub's 30-day rerun window. Dense windows are split to avoid
+GitHub's 1,000-result search cap, with a 100-read budget per lookup. Incomplete,
+changing or over-budget results abort verification. Source and target changes
+require a fresh preview; there remains a race between the final check and GitHub's
+rerun POST, as with other supported workflows.
+
+Upgrade every server-side process that reads repository policies, including the
+API server, admin commands, statistics and error collectors, before saving this
+policy. Earlier versions reject `pypto_ci`. Existing clients and saved logins work
+with 0.8.1. Existing App permissions cover the added read operations.
+
+Statistics already collect Full CI jobs. Filter by `.github/workflows/ci-full.yml`
+and, if selecting an event, `workflow_dispatch`. A `pull_request` event filter only
+includes the automatic PR workflow, and historical `ci.yml` runs remain a separate
+workflow group.
 
 ## Register and install the App
 

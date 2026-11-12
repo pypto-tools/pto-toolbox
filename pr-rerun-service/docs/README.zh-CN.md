@@ -18,6 +18,9 @@ GitHub Token 发起重跑。用户只拿到独立的服务访问令牌。
 0.3.0 的 App 认证与每仓库规则管理请参阅[多仓库指南](multi-repository.zh-CN.md)。
 下文安装步骤适用于兼容的单仓库 `gh`/Token 模式。
 
+服务端 0.8.1 通过显式的 [`pypto_ci` 规则](multi-repository.zh-CN.md#pypto-评论触发的-full-ci服务端-081)
+支持 PyPTO 在可信 `main` 上 dispatch 的 Full CI。普通 `pull_request` 策略不接受任意 dispatch。
+
 ## 使用流程
 
 1. 用户输入 PR 编号，后台核对访问令牌绑定的 GitHub 用户 ID 与 PR 作者 ID。

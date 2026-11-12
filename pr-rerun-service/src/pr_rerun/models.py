@@ -37,13 +37,18 @@ class StrictModel(BaseModel):
 class WorkflowRule(StrictModel):
     path: str = Field(pattern=r"^\.github/workflows/[A-Za-z0-9_-]+\.ya?ml$")
     mode: Mode = "failed"
-    identity: Literal["pull_request", "codex_manifest"] = "pull_request"
+    identity: Literal["pull_request", "codex_manifest", "pypto_ci"] = "pull_request"
 
     @model_validator(mode="after")
     def check_mode(self):
         # An all-jobs rerun is an explicit exception for the Codex workflow.
         if (self.mode == "all") != (self.identity == "codex_manifest"):
             raise ValueError("codex_manifest requires all; ordinary PR workflows require failed")
+        if self.identity == "pypto_ci" and self.path not in {
+            ".github/workflows/ci.yml",
+            ".github/workflows/ci-full.yml",
+        }:
+            raise ValueError("pypto_ci requires ci.yml or ci-full.yml")
         return self
 
 
@@ -143,6 +148,8 @@ class PullRequest(StrictModel):
     head_repository_id: int
     head_ref: str
     base_ref: str
+    base_sha: str | None = None
+    merge_sha: str | None = None
     draft: bool
     url: str
 

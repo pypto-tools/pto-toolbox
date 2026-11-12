@@ -48,6 +48,46 @@
 提交或结果未知的请求，不等于限制 GitHub 中所有运行中的 CI。未知结果需先用
 `status` 核查，再决定下一步；原有运行尝试防重复机制继续生效。
 
+### PyPTO 评论触发的 Full CI（服务端 0.8.1）
+
+运行 PyPTO 可信 `ci_control.py` 协议的仓库，可以给下面两个路径显式启用
+`pypto_ci`。将现有规则中的 `workflows` 数组改成下面内容，保留其他字段，提交时
+使用当前 `expected_revision`。
+
+```json
+[
+  {"path": ".github/workflows/ci.yml", "mode": "failed", "identity": "pypto_ci"},
+  {"path": ".github/workflows/ci-full.yml", "mode": "failed", "identity": "pypto_ci"},
+  {"path": ".github/workflows/codex-review.yml", "mode": "all", "identity": "codex_manifest"}
+]
+```
+
+`ci.yml` 中自动触发的 PR lint 继续按普通 PR 校验。Full CI 在可信 `main` 上通过
+`workflow_dispatch` 运行，标题为 `CI full PR #NUMBER @HEAD base:BASE`，控制器在
+测试前验证不可变的 PR head/base/merge 输入。服务查询授权 workflow 的近期 dispatch
+记录，独立于镜像 job checks 和 `ci/full` 状态，核对仓库和 workflow ID、事件、源仓库、
+`main` 分支、当前 PR 作者/head/base，以及当前合并提交的 base/head 父提交顺序。
+标题只用于定位候选运行，不能单独证明归属。其他仅模仿标题的工作流不能启用此策略。
+
+两个路径中的 Full CI 按创建时间及 run ID 共同选取最新请求。旧任务被重跑也不会
+改变排序。最新请求成功、运行中、等待审批或已过期时，不会重新选择旧失败任务。
+已结束且含失败、超时或取消任务的运行使用 `rerun failed`，确认时再次校验身份和
+最新请求。目标已过期时，需要在 PR 中评论 `/ci full` 创建新测试请求；本服务不代发
+评论、不创建首次运行，也不批准 workflow。
+
+查询覆盖 GitHub 的 30 天重跑窗口。记录密集时拆分时间窗口，避免 GitHub 每次查询
+最多返回 1,000 条导致遗漏，每次查找最多读取 100 页。数据不完整、分页期间变化或
+超出预算时停止校验。源提交或目标提交改变后需要重新预览。与其他工作流一样，最后
+校验和 GitHub 接受重跑之间仍存在并发变更的时间窗口。
+
+保存新规则前，需升级读取规则的全部服务端进程，包括 API、管理员命令、统计采集器
+和错误采集器。旧版本不认识 `pypto_ci`。原有客户端和登录可继续使用，现有 App 权限
+已覆盖新增的读取操作。
+
+CI 统计已能收集 Full CI。可用 `.github/workflows/ci-full.yml` 筛选；如指定事件应选
+`workflow_dispatch`。`pull_request` 事件筛选只包含自动 PR 工作流，历史 `ci.yml`
+记录仍保留为独立 workflow 分组。
+
 ## 注册和安装 App
 
 在个人账号或用于运营服务的组织中进入：
