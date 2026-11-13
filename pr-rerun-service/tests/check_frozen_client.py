@@ -3,10 +3,12 @@
 import json
 import os
 import pty
+import select
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -195,6 +197,63 @@ def check_batch(binary, environment):
         os.close(slave)
 
 
+def check_terminal_confirmation(binary, environment):
+    # Exercise the actual input() TTY path, with stdout/stderr on the terminal too.
+    # Wait for each prompt before sending keys, as an interactive user would.
+    for answers, confirmed in [
+        ([b"y\n"], True),
+        ([b"maybe\n", b"y\n"], True),
+        ([b"maybe\n", b"n\n"], False),
+        ([b"\n"], False),
+    ]:
+        Handler.batch_events = []
+        master, slave = pty.openpty()
+        process = None
+        output = b""
+        sent = 0
+        try:
+            process = subprocess.Popen(
+                [binary, "10", "--repo", "example/project"],
+                env={**environment, "TERM": "xterm-256color"},
+                stdin=slave,
+                stdout=slave,
+                stderr=slave,
+            )
+            os.close(slave)
+            slave = -1
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline:
+                if not select.select([master], [], [], 0.1)[0]:
+                    continue
+                try:
+                    chunk = os.read(master, 65536)
+                except OSError:
+                    break  # Linux PTYs return EIO after the slave closes.
+                if not chunk:
+                    break
+                output += chunk
+                if sent < len(answers) and output.count(b"Confirm? [y/N] ") > sent:
+                    assert Handler.batch_events == [("preview", 10)], output
+                    os.write(master, answers[sent])
+                    sent += 1
+            assert sent == len(answers), output
+            assert process.wait(timeout=5) == (0 if confirmed else 1), output
+            assert Handler.batch_events == (
+                [("preview", 10), ("confirm", 10)] if confirmed else [("preview", 10)]
+            ), output
+            assert (b"Cancelled. No rerun was requested." in output) == (not confirmed), output
+            if len(answers) > 1:
+                assert output.count(b"Input not recognized.") == 1, output
+        finally:
+            if process is not None and process.poll() is None:
+                process.kill()
+                process.wait(timeout=5)
+            os.close(master)
+            if slave != -1:
+                os.close(slave)
+    print("Interactive TTY confirmation, invalid input correction and cancellation passed")
+
+
 def main():
     binary = str(Path(sys.argv[1]).absolute())
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -232,6 +291,7 @@ def main():
             for args in commands:
                 if args == ["logout"]:
                     check_batch(binary, environment)
+                    check_terminal_confirmation(binary, environment)
                 completed = subprocess.run(
                     [binary, *args],
                     env=environment,

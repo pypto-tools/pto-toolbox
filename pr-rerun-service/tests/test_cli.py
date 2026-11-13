@@ -152,10 +152,11 @@ def test_cli_requires_explicit_yes_and_preserves_server_confirmation(
     monkeypatch, capsys, answer, expected_posts, verbose, jobs
 ):
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    answers = iter([answer, "n"])
 
     def respond_to_prompt(prompt):
         assert prompt == "Confirm? [y/N] "
-        return answer
+        return next(answers)
 
     monkeypatch.setattr("builtins.input", respond_to_prompt)
     calls = []
@@ -369,6 +370,51 @@ def test_batch_decline_skips_only_current_pr(batch_remote, monkeypatch, capsys):
         ("confirm", 12),
     ]
     assert "declined" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("answer", ["y", "n", ""])
+def test_invalid_confirmation_reprompts_without_submitting_or_skipping_pr(
+    batch_remote, monkeypatch, capsys, answer
+):
+    invalid = ["yes", "maybe", "ｙ", "y\u200b", "y\x00", "\x1b[200~y\x1b[201~"]
+    answers = iter([*invalid, answer])
+
+    def respond(prompt):
+        assert prompt == "Confirm? [y/N] "
+        assert batch_remote.events == [("preview", 10)]
+        return next(answers)
+
+    monkeypatch.setattr("builtins.input", respond)
+    with httpx.Client(
+        base_url="https://example.test", transport=httpx.MockTransport(batch_remote)
+    ) as client:
+        assert run_client(client, "10", None, "owner/repo") == (0 if answer == "y" else 1)
+    expected = [("preview", 10)] + ([("confirm", 10)] if answer == "y" else [])
+    assert batch_remote.events == expected
+    output = capsys.readouterr().out
+    assert output.count("Input not recognized.") == len(invalid)
+    assert ("Cancelled. No rerun was requested." in output) == (answer != "y")
+    assert "\x1b" not in output and "\x00" not in output
+
+
+@pytest.mark.parametrize("interrupt", [EOFError, KeyboardInterrupt])
+def test_invalid_confirmation_then_interrupt_never_submits(batch_remote, monkeypatch, interrupt):
+    calls = 0
+
+    def respond(prompt):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return "maybe"
+        raise interrupt
+
+    monkeypatch.setattr("builtins.input", respond)
+    with httpx.Client(
+        base_url="https://example.test", transport=httpx.MockTransport(batch_remote)
+    ) as client:
+        with pytest.raises(interrupt):
+            run_client(client, "10", None, "owner/repo")
+    assert batch_remote.events == [("preview", 10)]
 
 
 @pytest.mark.parametrize(

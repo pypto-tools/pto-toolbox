@@ -7,6 +7,32 @@ This guide covers the 0.4.1 App deployment. For initial setup and enrollment see
 offline updates and rollback see [client releases](client-releases.md).
 All addresses, paths and account names in these guides are examples.
 
+## Confirmation input and unexpected cancellation (client 0.9.1)
+
+At `Confirm? [y/N]`, type `y` and Enter to submit the displayed preview. `n` or an
+empty answer cancels. Letter case and surrounding whitespace are ignored. Starting
+with 0.9.1, other input produces an explanation and another prompt for the same PR;
+it neither submits nor skips to the next PR. The original ticket and server-side
+expiration checks remain in force. Ctrl+C or end-of-input still stops the command.
+
+Older clients report every non-`y` answer as cancelled, so the visible prompt alone
+cannot explain what was read. If an ordinary `y` unexpectedly cancels, collect
+versions **on the affected user's machine**, not just the service host:
+
+```bash
+type -a pr-rerun
+pr-rerun --version
+/usr/local/bin/pr-rerun --version
+```
+
+Upgrade each affected shared client with `sudo pr-rerun-update --version 0.9.1`.
+Existing login state is retained; this change does not require a server upgrade.
+If paths resolve to different installations, check which one the user's shell
+actually selects. A backend request still in `preview` has not been submitted;
+an `unknown` or `submitting` request instead requires status inspection before
+retrying. This input-handling improvement does not establish the cause of every
+reported cancellation; do not assume a user's typing or clipboard caused it.
+
 ## Upgrading for PyPTO Full CI (0.8.1)
 
 Prepare the 0.8.1 wheel and update the API, admin launcher and both collection

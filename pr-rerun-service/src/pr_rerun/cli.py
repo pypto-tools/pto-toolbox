@@ -518,10 +518,14 @@ def _rerun_pr(
     request_id = preview["request_id"]
     print(f"Request ID: {safe_text(request_id)}")
     print(f"Confirm reruns for: {safe_text(preview['confirmation'])}")
-    answer = input("Confirm? [y/N] ").strip().lower()
-    if answer != "y":
-        print("Cancelled. No rerun was requested.")
-        return _PRResult(1, "declined", request_id)
+    while True:
+        answer = input("Confirm? [y/N] ").strip().lower()
+        if answer == "y":
+            break
+        if answer in {"", "n"}:
+            print("Cancelled. No rerun was requested.")
+            return _PRResult(1, "declined", request_id)
+        print("Input not recognized. Type y to confirm, or n / Enter to cancel.")
     try:
         with progress("Rechecking and submitting reruns"):
             result = request(
