@@ -50,6 +50,11 @@
 
 ### PyPTO 评论触发的 Full CI（服务端 0.8.1）
 
+服务端 0.9.2 进一步兼容运行标题末尾新增的 ` request:RUN_ID-ATTEMPT`，
+两部分必须为正十进制整数。后缀标识发起测试的 CI 命令，不替代 PR、workflow 或 merge 父提交校验。
+旧服务端会漏掉这种格式，可能错误提示没有可重跑的失败任务；升级并重启 API 即可，
+已有 `pypto_ci` 规则和客户端仍然兼容。
+
 运行 PyPTO 可信 `ci_control.py` 协议的仓库，可以给下面两个路径显式启用
 `pypto_ci`。将现有规则中的 `workflows` 数组改成下面内容，保留其他字段，提交时
 使用当前 `expected_revision`。

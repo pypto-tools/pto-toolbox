@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from pr_rerun.api import create_app
+from pr_rerun.full_ci import full_target
 from pr_rerun.github import GitHub
 from pr_rerun.models import UpstreamError, WorkflowRule
 
@@ -19,8 +20,9 @@ LEGACY = ".github/workflows/ci.yml"
 
 
 class FullRemote(Remote):
-    def __init__(self):
+    def __init__(self, suffix=""):
         super().__init__()
+        self.suffix = suffix
         self.pr["base"]["sha"] = BASE
         self.pr["merge_commit_sha"] = MERGE
         self.ref_sha: str | None = MERGE
@@ -45,7 +47,7 @@ class FullRemote(Remote):
             head_repository={"id": 44},
             # Main-branch PR links can refer to an unrelated historical PR.
             pull_requests=[{"number": 5}],
-            display_title=f"CI full PR #123 @{HEAD} base:{BASE}",
+            display_title=f"CI full PR #123 @{HEAD} base:{BASE}{self.suffix}",
             created_at=(datetime.now(timezone.utc) - timedelta(seconds=age)).isoformat(),
         )
         run.update(updates)
@@ -89,9 +91,35 @@ class FullRemote(Remote):
         return super().__call__(request)
 
 
-@pytest.fixture
-def full_remote():
-    return FullRemote()
+@pytest.fixture(params=["", " request:43882976191-1"])
+def full_remote(request):
+    return FullRemote(request.param)
+
+
+@pytest.mark.parametrize("suffix", ["", " request:43882976191-1", " request:1-2"])
+def test_full_title_accepts_optional_command_request_identity(suffix):
+    run = {"display_title": f"CI full PR #123 @{HEAD} base:{BASE}{suffix}"}
+    assert full_target(run) == (123, HEAD, BASE)
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        " request:",
+        " request:0-1",
+        " request:1-0",
+        " request:01-1",
+        " request:1",
+        " request:1-2-extra",
+        " request:1-1 anything",
+        " request:1-1\n",
+        " request:1-1 request:2-1",
+        " request:１２-1",
+    ],
+)
+def test_malformed_command_request_suffix_is_not_a_full_target(suffix):
+    run = {"display_title": f"CI full PR #123 @{HEAD} base:{BASE}{suffix}"}
+    assert full_target(run) is None
 
 
 @pytest.fixture

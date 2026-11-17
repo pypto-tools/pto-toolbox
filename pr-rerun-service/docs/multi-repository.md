@@ -86,6 +86,12 @@ retaining its other fields and current `expected_revision`:
 `ci.yml` retains ordinary PR lint attribution. Full CI uses `workflow_dispatch`
 on trusted `main` with the title `CI full PR #NUMBER @HEAD base:BASE` and a
 controller that validates immutable PR head/base/merge inputs before tests.
+Server 0.9.2 also recognizes the optional ` request:RUN_ID-ATTEMPT` suffix added
+by the CI command controller. Both parts must be positive decimal integers.
+The suffix identifies the originating command; it does not replace the PR,
+workflow or merge-parent checks. Older servers miss these runs during discovery
+and may incorrectly report that no eligible failures exist. Upgrade and restart
+the API; existing `pypto_ci` rules and clients remain compatible.
 The service reads the allowed workflows' recent dispatch history, independently
 of mirrored job checks and `ci/full` statuses. It verifies repository and workflow
 IDs, event, source repository, `main` branch, current PR author/head/base and the

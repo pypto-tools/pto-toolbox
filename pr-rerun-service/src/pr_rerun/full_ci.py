@@ -10,7 +10,10 @@ from datetime import datetime
 from pr_rerun.models import UpstreamError, positive_id
 
 FULL_PATHS = {".github/workflows/ci.yml", ".github/workflows/ci-full.yml"}
-FULL_TITLE = re.compile(r"CI full PR #([1-9][0-9]*) @([0-9a-f]{40}) base:([0-9a-f]{40})")
+FULL_TITLE = re.compile(
+    r"CI full PR #([1-9][0-9]*) @([0-9a-f]{40}) base:([0-9a-f]{40})"
+    r"(?: request:[1-9][0-9]*-[1-9][0-9]*)?"
+)
 
 
 def full_target(run: dict) -> tuple[int, str, str] | None:
