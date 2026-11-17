@@ -1,6 +1,7 @@
 """Build plans from current PR checks and independently verifiable run identities."""
 
 import logging
+import re
 import threading
 import time
 from collections.abc import Callable
@@ -69,6 +70,27 @@ class Planner:
             raise ServiceError(403, "Target branch is not allowed by repository policy.")
         if pr["head"]["repo"] is None:
             raise ServiceError(409, "The PR source repository no longer exists.")
+        base_sha = pr["base"].get("sha") if self.full_paths else None
+        merge_sha = None
+        if self.full_paths and pr["base"]["ref"] == "main":
+            # REST base.sha can lag behind the GitHub-generated PR merge ref.
+            # Derive the tested base from that ref only after proving its second
+            # parent is this PR's current head. Never guess from a run's title.
+            base_sha = None
+            merge_sha = self.github.merge_ref(number)
+            if merge_sha is not None:
+                merge = self.github.merge_commit(merge_sha)
+                parents = merge.get("parents")
+                if (
+                    merge.get("sha") == merge_sha
+                    and isinstance(parents, list)
+                    and len(parents) == 2
+                    and all(isinstance(parent, dict) for parent in parents)
+                    and parents[1].get("sha") == pr["head"]["sha"]
+                    and isinstance(parents[0].get("sha"), str)
+                    and re.fullmatch(r"[0-9a-f]{40}", parents[0]["sha"])
+                ):
+                    base_sha = parents[0]["sha"]
         return PullRequest(
             repository_id=positive_id(pr["base"]["repo"]["id"]),
             number=number,
@@ -80,12 +102,8 @@ class Planner:
             head_repository_id=positive_id(pr["head"]["repo"]["id"]),
             head_ref=pr["head"]["ref"],
             base_ref=pr["base"]["ref"],
-            base_sha=pr["base"].get("sha") if self.full_paths else None,
-            # The PR endpoint may omit merge_commit_sha for installation tokens.
-            # Resolve GitHub's merge ref and independently verify its parents.
-            merge_sha=self.github.merge_ref(number)
-            if self.full_paths and pr["base"]["ref"] == "main"
-            else None,
+            base_sha=base_sha,
+            merge_sha=merge_sha,
             draft=pr["draft"],
             url=f"https://github.com/{self.settings.repository}/pull/{number}",
         )

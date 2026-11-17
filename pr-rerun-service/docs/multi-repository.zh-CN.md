@@ -55,6 +55,11 @@
 旧服务端会漏掉这种格式，可能错误提示没有可重跑的失败任务；升级并重启 API 即可，
 已有 `pypto_ci` 规则和客户端仍然兼容。
 
+服务端 0.9.3 从 GitHub 的 PR merge ref 及其父提交确定 base SHA，避免 PR 接口中滞后的
+`base.sha` 造成误判。合并提交必须恰好有两个父提交，第二个是 PR 当前 head；第一个才作为
+已验证的 base，并要求 Full CI 标题与之匹配。缺失或不一致的合并信息仍会排除 Full CI，
+提交重跑前也会再次检查 ref 和父提交。
+
 运行 PyPTO 可信 `ci_control.py` 协议的仓库，可以给下面两个路径显式启用
 `pypto_ci`。将现有规则中的 `workflows` 数组改成下面内容，保留其他字段，提交时
 使用当前 `expected_revision`。

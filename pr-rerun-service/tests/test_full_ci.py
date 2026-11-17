@@ -157,6 +157,40 @@ def test_full_run_not_in_checks_is_rerunnable(full_client, full_remote, conclusi
     }
 
 
+@pytest.mark.parametrize("rest_base", [MAIN, None])
+def test_verified_merge_parents_override_stale_or_missing_rest_base(
+    full_client, full_remote, rest_base
+):
+    if rest_base is None:
+        full_remote.pr["base"].pop("sha")
+    else:
+        full_remote.pr["base"]["sha"] = rest_base
+    plan = preview(full_client)
+    assert {r["run_id"] for r in plan["runs"]} == {101, 303}
+    assert plan["pr"]["base_sha"] == BASE
+    assert plan["pr"]["merge_sha"] == MERGE
+    assert confirm(full_client, plan).json()["state"] == "accepted"
+
+
+@pytest.mark.parametrize(
+    "parents",
+    [
+        [],
+        [{"sha": BASE}],
+        [{"sha": BASE}, {"sha": MAIN}],
+        [{"sha": BASE}, {"sha": HEAD}, {"sha": MAIN}],
+        [{"sha": "invalid"}, {"sha": HEAD}],
+        [{}, {"sha": HEAD}],
+    ],
+)
+def test_merge_target_requires_two_valid_parents_and_current_head(
+    full_client, full_remote, parents
+):
+    full_remote.commit["parents"] = parents
+    assert selected(full_client) == [101]
+    assert not full_remote.writes
+
+
 def test_old_full_and_lint_share_path_but_have_independent_plans(full_client, full_remote):
     del full_remote.runs[303]
     full_remote.add_full(302, path=LEGACY)
@@ -220,6 +254,7 @@ def test_current_merge_and_workflow_identity_are_required(full_client, full_remo
         full_remote.commit["sha"] = MAIN
     elif change == "base":
         full_remote.pr["base"]["sha"] = MAIN
+        full_remote.commit["parents"][0]["sha"] = MAIN
     elif change == "branch":
         full_remote.pr["base"]["ref"] = "release"
         full_remote.runs[101]["pull_requests"][0]["base"]["ref"] = "release"
@@ -235,6 +270,7 @@ def test_confirmation_revalidates_full_request(full_client, full_remote, change)
     plan = preview(full_client)
     if change == "base":
         full_remote.pr["base"]["sha"] = MAIN
+        full_remote.commit["parents"][0]["sha"] = MAIN
     elif change == "head":
         full_remote.pr["head"]["sha"] = MAIN
         full_remote.graph_head = MAIN
@@ -264,9 +300,12 @@ def test_changes_during_final_validation_prevent_write(full_client, full_remote,
         )
         if matches:
             count += 1
-            if count == 2:  # confirm rebuild then final per-run validation
+            # Base: resolve and verify on rebuild, then resolve before writing.
+            # Request: discovery on rebuild, then discovery before writing.
+            if count == (3 if change == "base" else 2):
                 if change == "base":
                     full_remote.pr["base"]["sha"] = MAIN
+                    full_remote.commit["parents"][0]["sha"] = MAIN
                 else:
                     full_remote.add_full(304, age=30)
 

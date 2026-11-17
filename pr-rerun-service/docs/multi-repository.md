@@ -92,6 +92,11 @@ The suffix identifies the originating command; it does not replace the PR,
 workflow or merge-parent checks. Older servers miss these runs during discovery
 and may incorrectly report that no eligible failures exist. Upgrade and restart
 the API; existing `pypto_ci` rules and clients remain compatible.
+Server 0.9.3 derives the base SHA from GitHub's PR merge ref rather than the PR
+endpoint's potentially lagging `base.sha`. The merge commit must have exactly two
+parents, with the current PR head as the second; its first parent is then the
+verified base. The Full CI title must match that base. A missing or inconsistent
+merge still excludes Full CI, and the ref/parents are checked again before writes.
 The service reads the allowed workflows' recent dispatch history, independently
 of mirrored job checks and `ci/full` statuses. It verifies repository and workflow
 IDs, event, source repository, `main` branch, current PR author/head/base and the
